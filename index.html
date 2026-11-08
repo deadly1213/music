@@ -3,6 +3,449 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Адаптивная музыка (Speed Up от 130 шагов)</title>
+<style>
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0e0e12;
+    color: #eaeaea;
+    margin: 0 auto;
+    padding: 20px;
+    max-width: 680px;
+  }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  p  { color: #aab; font-size: 14px; line-height: 1.5; }
+  button {
+    padding: 14px 20px;
+    font-size: 16px;
+    margin: 6px 6px 6px 0;
+    border-radius: 10px;
+    border: none;
+    background: #2fbf71;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:disabled { background: #444; cursor: not-allowed; }
+  .slider-row { margin: 18px 0; }
+  input[type=range] { width: 100%; height: 30px; }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 16px 0;
+  }
+  .stat {
+    background: #1a1a22;
+    padding: 12px;
+    border-radius: 10px;
+    text-align: center;
+  }
+  .stat small { color: #889; font-size: 12px; display: block; margin-bottom: 4px; }
+  .stat b { font-size: 24px; color: #2fbf71; }
+  .bar-wrap {
+    background: #1a1a22;
+    height: 14px;
+    border-radius: 7px;
+    overflow: hidden;
+    margin: 10px 0 20px;
+  }
+  .bar { height: 100%; background: linear-gradient(90deg,#2fbf71,#f0b429,#e74c3c); width: 0%; transition: width 0.15s; }
+  #log {
+    background: #000;
+    color: #4f4;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 12px;
+    height: 150px;
+    overflow-y: auto;
+    border-radius: 8px;
+    white-space: pre-wrap;
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+
+<h1>🏃 Адаптивная музыка (Speed Up)</h1>
+<p>Нажмите <b>Старт</b>. До 130 шагов — оригинал. Выше — плавный разгон до 1.35x.</p>
+
+<button id="startBtn">▶️ Старт</button>
+
+<div class="slider-row">
+  <label>Темп вручную: <span id="sliderVal">1.00x</span></label>
+  <input type="range" id="slider" min="1.00" max="1.35" step="0.01" value="1.00" disabled>
+</div>
+
+<div class="stats">
+  <div class="stat"><small>Шагов/мин</small><b id="cadence">0</b></div>
+  <div class="stat"><small>Скорость</small><b id="playbackRate">1.00x</b></div>
+  <div class="stat"><small>Состояние</small><b id="modeState">Normal</b></div>
+</div>
+
+<div class="bar-wrap"><div class="bar" id="intensityBar"></div></div>
+
+<div id="log">Готов к запуску. Нажмите «Старт».</div>
+
+<script>
+// ============================================================
+// 1. КОНФИГУРАЦИЯ
+// ============================================================
+
+const LAYER_NAMES = ['melody', 'snare', 'hat', 'bass808'];
+const LAYER_FILES = {
+  melody:  './melody.wav',
+  snare:   './snare.wav',
+  hat:     './hat.wav',
+  bass808: './808.wav'
+};
+
+const BEAT_DURATION = 3.42; 
+const INTRO_BEATS = 3;
+const INTRO_DURATION = BEAT_DURATION * INTRO_BEATS; 
+
+// ============================================================
+// 2. АУДИО-ДВИЖОК
+// ============================================================
+
+let ctx = null;
+let masterGain = null;
+let limiter = null;
+let layers = null; 
+let currentRate = 1.0;
+let sliderOverrideUntil = 0;
+
+let wavBuffers = {};
+let activeSources = {}; 
+
+let melodyDelay = null;
+let melodyDelayFeedback = null;
+let melodyDryGain = null;
+let melodyWetGain = null;
+
+function initAudio() {
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = ctx.createGain();
+  masterGain.gain.value = 0.55;
+
+  limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -8;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.1;
+
+  masterGain.connect(limiter).connect(ctx.destination);
+
+  layers = {};
+  for (const name of LAYER_NAMES) {
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+
+    const filter = ctx.createBiquadFilter();
+    if (name === 'melody') { filter.type = 'lowpass'; filter.frequency.value = 4000; }
+    else if (name === 'snare') { filter.type = 'highpass'; filter.frequency.value = 400; }
+    else if (name === 'hat') { filter.type = 'highpass'; filter.frequency.value = 3000; }
+    else if (name === 'bass808') { filter.type = 'lowpass'; filter.frequency.value = 80; }
+
+    if (name === 'melody') {
+      melodyDelay = ctx.createDelay(1.0);
+      melodyDelay.delayTime.value = 0.35;
+      melodyDelayFeedback = ctx.createGain();
+      melodyDelayFeedback.gain.value = 0.4;
+      melodyWetGain = ctx.createGain();
+      melodyWetGain.gain.value = 0;
+      melodyDryGain = ctx.createGain();
+      melodyDryGain.gain.value = 1.0;
+
+      gain.connect(filter);
+      filter.connect(melodyDryGain).connect(masterGain);
+      filter.connect(melodyDelay);
+      melodyDelay.connect(melodyDelayFeedback).connect(melodyDelay);
+      melodyDelay.connect(melodyWetGain).connect(masterGain);
+    } else {
+      gain.connect(filter).connect(masterGain);
+    }
+    layers[name] = { gain, filter };
+  }
+  setPlaybackSpeed(1.0, true);
+}
+
+// ============================================================
+// 3. УПРАВЛЕНИЕ СКОРОСТЬЮ (Speed Up от 130 шагов)
+// ============================================================
+
+function setPlaybackSpeed(rate, fromSlider = false) {
+  if (!ctx) return;
+  rate = Math.max(1.0, Math.min(1.35, rate));
+  
+  const now = ctx.currentTime;
+  const rampTime = 1.5; 
+
+  for (const name in activeSources) {
+    if (activeSources[name]) {
+      activeSources[name].playbackRate.linearRampToValueAtTime(rate, now + rampTime);
+    }
+  }
+
+  const x = (rate - 1.0) / 0.35; // Нормализация от 0 до 1
+  layers.melody.filter.frequency.linearRampToValueAtTime(4000 + 2000 * x, now + rampTime);
+  layers.bass808.filter.frequency.linearRampToValueAtTime(80 + 250 * x, now + rampTime);
+  melodyWetGain.gain.linearRampToValueAtTime(0.2 + 0.3 * x, now + rampTime);
+
+  currentRate = rate;
+
+  document.getElementById('playbackRate').textContent = rate.toFixed(2) + 'x';
+  const barWidth = ((rate - 1.0) / 0.35) * 100;
+  document.getElementById('intensityBar').style.width = barWidth + '%';
+
+  document.getElementById('modeState').textContent = rate > 1.01 ? 'Speed Up' : 'Normal';
+
+  if (!fromSlider) {
+    document.getElementById('slider').value = rate;
+    document.getElementById('sliderVal').textContent = rate.toFixed(2) + 'x';
+  }
+}
+
+// ============================================================
+// 4. ШАГОМЕР
+// ============================================================
+
+let motionActive = false;
+let motionEventCount = 0;
+let stepTimestamps = [];
+let totalSteps = 0;
+let lastStepTime = 0;
+let aboveThreshold = false;
+
+let dynamicHigh = 11.0; 
+let dynamicLow = 9.8;   
+let gravityMag = 9.8;   
+
+function handleMotion(event) {
+  if (performance.now() < sliderOverrideUntil) return;
+  const acc = event.accelerationIncludingGravity;
+  if (!acc) return;
+
+  motionEventCount++;
+  if (motionEventCount < 3) return;
+  if (!motionActive) { motionActive = true; log('✅ Шагомер активен'); }
+
+  const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+  
+  if (mag > 9.0 && mag < 10.5 && performance.now() - lastStepTime > 1500) {
+    gravityMag = (gravityMag * 0.95) + (mag * 0.05);
+    dynamicHigh = gravityMag + 1.5;
+    dynamicLow = gravityMag + 0.2;
+  }
+
+  if (mag > dynamicHigh && !aboveThreshold) {
+    const now = performance.now();
+    if (now - lastStepTime > 180) { 
+      lastStepTime = now;
+      totalSteps++;
+      stepTimestamps.push(now);
+      if (stepTimestamps.length > 50) stepTimestamps.shift();
+    }
+    aboveThreshold = true;
+  } else if (mag < dynamicLow) {
+    aboveThreshold = false;
+  }
+}
+
+setInterval(() => {
+  if (!motionActive) return;
+  if (performance.now() < sliderOverrideUntil) return;
+
+  const now = performance.now();
+  stepTimestamps = stepTimestamps.filter(t => now - t < 4000); 
+  const cadence = stepTimestamps.length * 15;
+  document.getElementById('cadence').textContent = cadence.toFixed(0);
+
+  // --- ЛОГИКА SPEED UP (ОТ 130 ДО 200 ШАГОВ) ---
+  let targetRate = 1.0;
+  
+  if (cadence > 130) {
+    // Если больше 130 шагов/мин -> ускоряем.
+    // 130 шагов = 1.0x, 200 шагов = 1.35x
+    const speedFactor = (cadence - 130) / 70; 
+    targetRate = 1.0 + (speedFactor * 0.35); 
+  }
+  
+  targetRate = Math.max(1.0, Math.min(1.35, targetRate));
+  setPlaybackSpeed(targetRate);
+  
+}, 500); 
+
+// ============================================================
+// 5. ЛОГИКА ВОСПРОИЗВЕДЕНИЯ
+// ============================================================
+
+let sequencerTimer = null;
+let isGenerating = false;
+
+async function loadAllWavs() {
+  log('⏳ Загрузка WAV…');
+  for (const name of LAYER_NAMES) {
+    try {
+      const response = await fetch(LAYER_FILES[name]);
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = await ctx.decodeAudioData(arrayBuffer);
+      wavBuffers[name] = buffer;
+      log('✅ ' + name + ' (' + buffer.duration.toFixed(2) + ' с)');
+    } catch (err) {
+      log('❌ ' + name + ': ' + err.message);
+      throw new Error('Файл не найден: ' + LAYER_FILES[name]);
+    }
+  }
+  
+  startIntro();
+}
+
+function playLayer(name, time, isIntro = false) {
+  if (!wavBuffers[name]) return;
+  if (activeSources[name]) {
+    try { activeSources[name].stop(time); } catch(e) {}
+  }
+  
+  const src = ctx.createBufferSource();
+  src.buffer = wavBuffers[name];
+  src.loop = isIntro; 
+  src.playbackRate.value = currentRate; 
+
+  src.connect(layers[name].gain);
+  src.start(time);
+  activeSources[name] = src;
+}
+
+function startIntro() {
+  log('▶️ ИНТРО: Играет только мелодия (Оригинал).');
+  
+  const now = ctx.currentTime;
+  layers.melody.gain.gain.setValueAtTime(1.0, now);
+  playLayer('melody', now, true); 
+
+  ['snare', 'hat', 'bass808'].forEach(name => {
+    layers[name].gain.gain.setValueAtTime(0, now);
+  });
+
+  setTimeout(() => {
+    log('🔥 ДРОП: Все 4 файла стартуют одновременно!');
+    startDrop();
+  }, INTRO_DURATION * 1000);
+}
+
+function startDrop() {
+  if (activeSources['melody']) {
+    try { activeSources['melody'].stop(); } catch(e) {}
+  }
+
+  const now = ctx.currentTime;
+  const startTime = now + 0.05;
+
+  LAYER_NAMES.forEach(name => {
+    layers[name].gain.gain.setValueAtTime(1.0, startTime); 
+    playLayer(name, startTime, false); 
+  });
+
+  setTimeout(() => {
+    isGenerating = true;
+    log('🎲 КОНЕЦ ДРОПА: Включается генерация.');
+    scheduleNextBar();
+  }, (BEAT_DURATION / currentRate) * 1000);
+}
+
+function scheduleNextBar() {
+  if (!ctx || ctx.state !== 'running' || !isGenerating) return;
+
+  const now = ctx.currentTime;
+  const startTime = now + 0.05;
+  
+  const x = (currentRate - 1.0) / 0.35; 
+
+  layers.melody.gain.gain.setValueAtTime(0.8 - 0.2 * x, startTime);
+  playLayer('melody', startTime, false);
+
+  if (Math.random() < 0.8) {
+    layers.bass808.gain.gain.setValueAtTime(0.2 + 0.7 * x, startTime);
+    playLayer('bass808', startTime, false);
+  }
+  
+  if (Math.random() < (0.2 + (x * 0.7))) {
+    layers.snare.gain.gain.setValueAtTime(0.1 + 0.8 * x, startTime);
+    playLayer('snare', startTime, false);
+  }
+
+  if (Math.random() < (0.1 + (x * 0.8))) {
+    layers.hat.gain.gain.setValueAtTime(0.1 + 0.7 * x, startTime);
+    playLayer('hat', startTime, false);
+  }
+
+  const nextBarDelay = (BEAT_DURATION / currentRate) * 1000;
+  sequencerTimer = setTimeout(scheduleNextBar, nextBarDelay);
+}
+
+// ============================================================
+// 6. ИНТЕРФЕЙС
+// ============================================================
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const line = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
+  el.textContent = line + el.textContent;
+  if (el.textContent.length > 4000) el.textContent = el.textContent.slice(0, 4000);
+}
+
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('startBtn');
+  if (!ctx) {
+    try {
+      initAudio();
+      await ctx.resume();
+
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        const perm = await DeviceMotionEvent.requestPermission();
+        if (perm === 'granted') window.addEventListener('devicemotion', handleMotion);
+      } else if (window.DeviceMotionEvent) {
+        window.addEventListener('devicemotion', handleMotion);
+      }
+
+      document.getElementById('slider').disabled = false;
+      document.getElementById('slider').addEventListener('input', (e) => {
+        if (!ctx) return;
+        sliderOverrideUntil = performance.now() + 5000;
+        const v = parseFloat(e.target.value);
+        document.getElementById('sliderVal').textContent = v.toFixed(2) + 'x';
+        setPlaybackSpeed(v, true);
+      });
+
+      btn.textContent = '⏳ Загрузка…';
+      btn.disabled = true;
+      await loadAllWavs();
+      btn.textContent = '⏸ Пауза';
+      btn.disabled = false;
+    } catch (e) {
+      log('❌ Ошибка: ' + e.message);
+      btn.textContent = '▶️ Старт';
+      btn.disabled = false;
+    }
+  } else {
+    if (ctx.state === 'running') {
+      await ctx.suspend();
+      btn.textContent = '▶️ Продолжить';
+    } else {
+      await ctx.resume();
+      btn.textContent = '⏸ Пауза';
+    }
+  }
+});
+</script>
+</body>
+</html>DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Адаптивная музыка (Оригинал до 200 шагов + Speed Up)</title>
 <style>
   body {
