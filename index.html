@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Оригинал + Speed Up)</title>
+<title>Адаптивная музыка (Оригинал до 200 шагов + Speed Up)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -68,13 +68,14 @@
 <body>
 
 <h1>🏃 Адаптивная музыка (Оригинал / Speed Up)</h1>
-<p>Нажмите <b>Старт</b>. Идите — играет оригинал. Бегите — музыка плавно ускоряется.</p>
+<p>Нажмите <b>Старт</b>. Идите или бегите — играет оригинал. Спринт (200+ шагов) — музыка ускоряется.</p>
 
 <button id="startBtn">▶️ Старт</button>
 
 <div class="slider-row">
   <label>Темп вручную: <span id="sliderVal">1.00x</span></label>
-  <input type="range" id="slider" min="1.00" max="1.25" step="0.01" value="1.00" disabled>
+  <!-- Слайдер теперь от 1.00 до 1.35 -->
+  <input type="range" id="slider" min="1.00" max="1.35" step="0.01" value="1.00" disabled>
 </div>
 
 <div class="stats">
@@ -118,7 +119,6 @@ let sliderOverrideUntil = 0;
 let wavBuffers = {};
 let activeSources = {}; 
 
-// Эффекты
 let melodyDelay = null;
 let melodyDelayFeedback = null;
 let melodyDryGain = null;
@@ -172,40 +172,37 @@ function initAudio() {
 }
 
 // ============================================================
-// 3. УПРАВЛЕНИЕ СКОРОСТЬЮ (Только Speed Up)
+// 3. УПРАВЛЕНИЕ СКОРОСТЬЮ (Speed Up от 200 шагов)
 // ============================================================
 
 function setPlaybackSpeed(rate, fromSlider = false) {
   if (!ctx) return;
-  // Ограничиваем скорость: от 1.0 (оригинал) до 1.25 (максимальный разгон)
-  rate = Math.max(1.0, Math.min(1.25, rate));
+  // Ограничиваем скорость: от 1.0 (оригинал) до 1.35 (максимальный разгон)
+  rate = Math.max(1.0, Math.min(1.35, rate));
   
   const now = ctx.currentTime;
-  const rampTime = 1.5; // 1.5 секунды на плавный разгон
+  const rampTime = 1.5; 
 
-  // Меняем скорость у всех активных источников
   for (const name in activeSources) {
     if (activeSources[name]) {
       activeSources[name].playbackRate.linearRampToValueAtTime(rate, now + rampTime);
     }
   }
 
-  // Эффекты: при разгоне фильтр мелодии приоткрывается для драйва
-  const x = (rate - 1.0) / 0.25; // 0.0 .. 1.0
+  // Нормализация для визуала и эффектов
+  const x = (rate - 1.0) / 0.35; // 0.0 .. 1.0
   layers.melody.filter.frequency.linearRampToValueAtTime(4000 + 2000 * x, now + rampTime);
   layers.bass808.filter.frequency.linearRampToValueAtTime(80 + 250 * x, now + rampTime);
-  
-  // Эхо остается на месте, просто чтобы трек звучал объемно
   melodyWetGain.gain.linearRampToValueAtTime(0.2 + 0.3 * x, now + rampTime);
 
   currentRate = rate;
 
   // UI
   document.getElementById('playbackRate').textContent = rate.toFixed(2) + 'x';
-  const barWidth = ((rate - 1.0) / 0.25) * 100;
+  const barWidth = ((rate - 1.0) / 0.35) * 100;
   document.getElementById('intensityBar').style.width = barWidth + '%';
 
-  document.getElementById('modeState').textContent = rate > 1.02 ? 'Speed Up' : 'Normal';
+  document.getElementById('modeState').textContent = rate > 1.01 ? 'Speed Up' : 'Normal';
 
   if (!fromSlider) {
     document.getElementById('slider').value = rate;
@@ -214,7 +211,7 @@ function setPlaybackSpeed(rate, fromSlider = false) {
 }
 
 // ============================================================
-// 4. ШАГОМЕР (Улучшенная чувствительность)
+// 4. ШАГОМЕР
 // ============================================================
 
 let motionActive = false;
@@ -224,10 +221,9 @@ let totalSteps = 0;
 let lastStepTime = 0;
 let aboveThreshold = false;
 
-// Новые настройки для лучшей чувствительности
-let dynamicHigh = 11.0; // Начальный верхний порог
-let dynamicLow = 9.8;   // Начальный нижний порог
-let gravityMag = 9.8;   // Текущая гравитация (для калибровки)
+let dynamicHigh = 11.0; 
+let dynamicLow = 9.8;   
+let gravityMag = 9.8;   
 
 function handleMotion(event) {
   if (performance.now() < sliderOverrideUntil) return;
@@ -240,16 +236,15 @@ function handleMotion(event) {
 
   const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
   
-  // Динамическая калибровка: если телефон в покое, запоминаем гравитацию
+  // Калибровка
   if (mag > 9.0 && mag < 10.5 && performance.now() - lastStepTime > 1500) {
     gravityMag = (gravityMag * 0.95) + (mag * 0.05);
-    dynamicHigh = gravityMag + 1.5; // Верхний порог чуть выше гравитации
-    dynamicLow = gravityMag + 0.2;  // Нижний порог чуть ниже
+    dynamicHigh = gravityMag + 1.5;
+    dynamicLow = gravityMag + 0.2;
   }
 
   if (mag > dynamicHigh && !aboveThreshold) {
     const now = performance.now();
-    // Защита от дребезга: шаги не чаще, чем раз в 180 мс (макс 333 шага/мин)
     if (now - lastStepTime > 180) { 
       lastStepTime = now;
       totalSteps++;
@@ -267,26 +262,24 @@ setInterval(() => {
   if (performance.now() < sliderOverrideUntil) return;
 
   const now = performance.now();
-  stepTimestamps = stepTimestamps.filter(t => now - t < 4000); // Считаем за 4 секунды (быстрее реакция)
-  
-  // Считаем каденс (шагов в минуту). 4 сек * 15 = 60 сек.
+  stepTimestamps = stepTimestamps.filter(t => now - t < 4000); 
   const cadence = stepTimestamps.length * 15;
   document.getElementById('cadence').textContent = cadence.toFixed(0);
 
   // --- ЛОГИКА ОРИГИНАЛ И SPEED UP ---
   let targetRate = 1.0;
   
-  if (cadence > 80) {
-    // Если больше 80 шагов/мин (бег) -> ускоряем.
-    // 80 шагов = 1.0x, 180 шагов = 1.25x
-    const speedFactor = (cadence - 80) / 100; 
-    targetRate = 1.0 + (speedFactor * 0.25); 
+  if (cadence > 200) {
+    // Если больше 200 шагов/мин (очень быстрый бег) -> ускоряем.
+    // 200 шагов = 1.0x, 300 шагов = 1.35x
+    const speedFactor = (cadence - 200) / 100; 
+    targetRate = 1.0 + (speedFactor * 0.35); 
   }
   
-  targetRate = Math.max(1.0, Math.min(1.25, targetRate));
+  targetRate = Math.max(1.0, Math.min(1.35, targetRate));
   setPlaybackSpeed(targetRate);
   
-}, 500); // Обновляем каждые полсекунды для лучшей отзывчивости
+}, 500); 
 
 // ============================================================
 // 5. ЛОГИКА ВОСПРОИЗВЕДЕНИЯ
@@ -323,8 +316,6 @@ function playLayer(name, time, isIntro = false) {
   const src = ctx.createBufferSource();
   src.buffer = wavBuffers[name];
   src.loop = isIntro; 
-  
-  // Устанавливаем текущую скорость при запуске нового источника
   src.playbackRate.value = currentRate; 
 
   src.connect(layers[name].gain);
@@ -375,7 +366,7 @@ function scheduleNextBar() {
   const now = ctx.currentTime;
   const startTime = now + 0.05;
   
-  const x = (currentRate - 1.0) / 0.25; // Интенсивность на основе скорости
+  const x = (currentRate - 1.0) / 0.35; 
 
   layers.melody.gain.gain.setValueAtTime(0.8 - 0.2 * x, startTime);
   playLayer('melody', startTime, false);
@@ -395,7 +386,6 @@ function scheduleNextBar() {
     playLayer('hat', startTime, false);
   }
 
-  // Планируем следующий такт с учетом ускорения
   const nextBarDelay = (BEAT_DURATION / currentRate) * 1000;
   sequencerTimer = setTimeout(scheduleNextBar, nextBarDelay);
 }
