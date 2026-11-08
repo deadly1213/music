@@ -57,7 +57,7 @@
     font-family: monospace;
     font-size: 12px;
     padding: 12px;
-    height: 200px;
+    height: 150px;
     overflow-y: auto;
     border-radius: 8px;
     white-space: pre-wrap;
@@ -69,7 +69,7 @@
 <body>
 
 <h1>🏃 Адаптивная музыка (melody / snare / hat / 808)</h1>
-<p>Нажмите <b>Старт</b> — код загрузит 4 файла из папки. Идите или бегите: чем чаще шаги, тем больше ритма и низа, тем меньше мелодии.</p>
+<p>Нажмите <b>Старт</b>. Код загрузит 4 файла. Идите или бегите: чем чаще шаги, тем сильнее эхо у мелодии и мощнее ритм.</p>
 
 <button id="startBtn">▶️ Старт</button>
 
@@ -88,11 +88,9 @@
 
 <div id="log">Готов к запуску. Нажмите «Старт».</div>
 
-<p class="hint">Файлы должны лежать рядом с index.html: melody.wav, snare.wav, hat.wav, 808.wav. Одинаковой длины, один BPM.</p>
-
 <script>
 // ============================================================
-// 1. КОНФИГУРАЦИЯ СЛОЁВ
+// 1. КОНФИГУРАЦИЯ СЛОЁВ И ИМЕНА ФАЙЛОВ
 // ============================================================
 
 const LAYER_NAMES = ['melody', 'snare', 'hat', 'bass808'];
@@ -105,7 +103,7 @@ const LAYER_FILES = {
 };
 
 // ============================================================
-// 2. АУДИО-ДВИЖОК
+// 2. АУДИО-ДВИЖОК (С добавлением Delay для мелодии)
 // ============================================================
 
 let ctx = null;
@@ -117,6 +115,12 @@ let sliderOverrideUntil = 0;
 
 let wavBuffers = {};
 let wavSources = {};
+
+// Эффекты для мелодии
+let melodyDelay = null;
+let melodyDelayFeedback = null;
+let melodyDryGain = null;
+let melodyWetGain = null;
 
 function initAudio() {
   ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -139,30 +143,46 @@ function initAudio() {
     gain.gain.value = 0;
 
     const filter = ctx.createBiquadFilter();
-
     if (name === 'melody') {
-      // Мелодия: при низкой интенсивности — яркая, при высокой — приглушённая
       filter.type = 'lowpass';
       filter.frequency.value = 4000;
-      filter.Q.value = 0.5;
     } else if (name === 'snare') {
-      // Снейр: при низкой — срезан, при высокой — полный, резкий
       filter.type = 'highpass';
       filter.frequency.value = 400;
-      filter.Q.value = 0.7;
     } else if (name === 'hat') {
-      // Хай-хэт: при низкой — глухой, при высокой — яркий
       filter.type = 'highpass';
       filter.frequency.value = 3000;
-      filter.Q.value = 0.7;
     } else if (name === 'bass808') {
-      // 808: при низкой — почти не слышен (lowpass закрыт), при высокой — открыт
       filter.type = 'lowpass';
       filter.frequency.value = 80;
-      filter.Q.value = 0.8;
     }
 
-    gain.connect(filter).connect(masterGain);
+    // Специальная цепочка эффектов для мелодии
+    if (name === 'melody') {
+      melodyDelay = ctx.createDelay(1.0);
+      melodyDelay.delayTime.value = 0.35; // Эхо с задержкой (примерно 8-я нота при 120 BPM)
+      
+      melodyDelayFeedback = ctx.createGain();
+      melodyDelayFeedback.gain.value = 0.4; // Длина хвоста эха
+
+      melodyWetGain = ctx.createGain();
+      melodyWetGain.gain.value = 0; // Громкость эха (меняется интенсивностью)
+
+      melodyDryGain = ctx.createGain();
+      melodyDryGain.gain.value = 1.0; // Громкость сухого сигнала
+
+      // Соединяем: Gain -> Filter -> Dry -> Master
+      gain.connect(filter);
+      filter.connect(melodyDryGain).connect(masterGain);
+
+      // Ответвление на эхо: Filter -> Delay -> Wet -> Master
+      filter.connect(melodyDelay);
+      melodyDelay.connect(melodyDelayFeedback).connect(melodyDelay); // Петля фидбека
+      melodyDelay.connect(melodyWetGain).connect(masterGain);
+    } else {
+      gain.connect(filter).connect(masterGain);
+    }
+
     layers[name] = { gain, filter };
   }
 
@@ -180,30 +200,22 @@ function applyIntensity(x, tau = 0.15, fromSlider = false) {
   const now = ctx.currentTime;
 
   // --- Громкость ---
-  // Мелодия: громкая в покое, тише при высокой интенсивности
-  layers.melody.gain.gain.setTargetAtTime(0.75 - 0.45 * x, now, tau);
-
-  // Снейр: почти нет в покое, громкий при высокой
+  layers.melody.gain.gain.setTargetAtTime(0.8 - 0.3 * x, now, tau);
   layers.snare.gain.gain.setTargetAtTime(0.1 + 0.85 * x, now, tau);
-
-  // Хай-хэт: тихий в покое, громкий и яркий при высокой
   layers.hat.gain.gain.setTargetAtTime(0.15 + 0.8 * x, now, tau);
-
-  // 808: почти нет в покое, мощный при высокой
   layers.bass808.gain.gain.setTargetAtTime(0.05 + 0.9 * x, now, tau);
 
   // --- Фильтры ---
-  // Мелодия: 4000 Гц → 800 Гц (приглушается)
-  layers.melody.filter.frequency.setTargetAtTime(4000 - 3200 * x, now, tau);
-
-  // Снейр: 1200 Гц → 200 Гц (открывается, становится полнее)
+  layers.melody.filter.frequency.setTargetAtTime(4000 - 2800 * x, now, tau); 
   layers.snare.filter.frequency.setTargetAtTime(1200 - 1000 * x, now, tau);
-
-  // Хай-хэт: 6000 Гц → 2000 Гц (ярче)
   layers.hat.filter.frequency.setTargetAtTime(6000 - 4000 * x, now, tau);
-
-  // 808: 80 Гц → 400 Гц (открывается, становится плотнее и слышнее)
   layers.bass808.filter.frequency.setTargetAtTime(80 + 320 * x, now, tau);
+
+  // --- Эффекты мелодии ---
+  // При x=0: эхо выключено (Wet=0), сухой звук на полную (Dry=1)
+  // При x=1: эхо на полную (Wet=0.6), сухой чуть тише (Dry=0.7) чтобы не было каши
+  if (melodyWetGain) melodyWetGain.gain.setTargetAtTime(x * 0.6, now, tau);
+  if (melodyDryGain) melodyDryGain.gain.setTargetAtTime(1.0 - 0.3 * x, now, tau);
 
   // --- UI ---
   document.getElementById('intensity').textContent = x.toFixed(2);
@@ -216,7 +228,7 @@ function applyIntensity(x, tau = 0.15, fromSlider = false) {
 }
 
 // ============================================================
-// 4. ШАГОМЕР
+// 4. ШАГОМЕР (Повышенная чувствительность)
 // ============================================================
 
 let motionActive = false;
@@ -225,6 +237,10 @@ let stepTimestamps = [];
 let totalSteps = 0;
 let lastStepTime = 0;
 let aboveThreshold = false;
+
+// Новые, более чувствительные пороги
+const THRESHOLD_HIGH = 11.2; 
+const THRESHOLD_LOW = 9.8;
 
 function handleMotion(event) {
   if (performance.now() < sliderOverrideUntil) return;
@@ -236,16 +252,14 @@ function handleMotion(event) {
 
   if (!motionActive) {
     motionActive = true;
-    log('✅ Шагомер активен');
+    log('✅ Шагомер активен (повышенная чувствительность)');
   }
 
   const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
-  const HIGH = 13.0;
-  const LOW = 10.5;
 
-  if (mag > HIGH && !aboveThreshold) {
+  if (mag > THRESHOLD_HIGH && !aboveThreshold) {
     const now = performance.now();
-    if (now - lastStepTime > 250) {
+    if (now - lastStepTime > 200) { // 200мс = до 300 шагов в минуту
       lastStepTime = now;
       totalSteps++;
       stepTimestamps.push(now);
@@ -253,7 +267,7 @@ function handleMotion(event) {
       document.getElementById('totalSteps').textContent = totalSteps;
     }
     aboveThreshold = true;
-  } else if (mag < LOW) {
+  } else if (mag < THRESHOLD_LOW) {
     aboveThreshold = false;
   }
 }
@@ -273,73 +287,7 @@ setInterval(() => {
 }, 1000);
 
 // ============================================================
-// 5. ЗАГРУЗКА 4 WAV
-// ============================================================
-
-async function loadAllWavs() {
-  log('⏳ Загрузка 4 WAV-файлов…');
-
-  for (const name of LAYER_NAMES) {
-    try {
-      const url = LAYER_FILES[name];
-      log('⏳ ' + name + ': ' + url);
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error('HTTP ' + response.status + ' — файл не найден?');
-      }
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = await ctx.decodeAudioData(arrayBuffer);
-      wavBuffers[name] = buffer;
-      log('✅ ' + name + ': ' + buffer.duration.toFixed(2) + ' с');
-    } catch (err) {
-      log('❌ ' + name + ': ' + err.message);
-      throw new Error('Не удалось загрузить ' + name + '. Проверьте ' + LAYER_FILES[name]);
-    }
-  }
-
-  const durations = LAYER_NAMES.map(n => wavBuffers[n].duration);
-  const min = Math.min(...durations);
-  const max = Math.max(...durations);
-  if (max - min > 0.05) {
-    log('⚠️ Длины файлов различаются на ' + (max - min).toFixed(2) + ' с — будет рассинхрон');
-  }
-
-  startWavPlayback();
-}
-
-function stopWavPlayback() {
-  for (const name of LAYER_NAMES) {
-    if (wavSources[name]) {
-      try { wavSources[name].stop(); } catch (e) {}
-      try { wavSources[name].disconnect(); } catch (e) {}
-      wavSources[name] = null;
-    }
-  }
-}
-
-function startWavPlayback() {
-  try {
-    stopWavPlayback();
-    const startAt = ctx.currentTime + 0.1;
-
-    for (const name of LAYER_NAMES) {
-      const src = ctx.createBufferSource();
-      src.buffer = wavBuffers[name];
-      src.loop = true;
-      src.connect(layers[name].gain);
-      src.start(startAt);
-      wavSources[name] = src;
-    }
-
-    applyIntensity(currentIntensity, 0.01, false);
-    log('🎵 Все 4 слоя играют синхронно. Интенсивность меняет ритм, низ и мелодию.');
-  } catch (err) {
-    log('❌ Ошибка запуска WAV: ' + err.message);
-  }
-}
-
-// ============================================================
-// 6. ИНТЕРФЕЙС
+// 5. ЗАГРУЗКА WAV И ИНТЕРФЕЙС
 // ============================================================
 
 function log(msg) {
@@ -349,6 +297,55 @@ function log(msg) {
   if (el.textContent.length > 4000) el.textContent = el.textContent.slice(0, 4000);
 }
 
+async function loadAllWavs() {
+  log('⏳ Загрузка 4 WAV-файлов…');
+  for (const name of LAYER_NAMES) {
+    try {
+      const url = LAYER_FILES[name];
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = await ctx.decodeAudioData(arrayBuffer);
+      wavBuffers[name] = buffer;
+      log('✅ ' + name + ': ' + buffer.duration.toFixed(2) + ' с');
+    } catch (err) {
+      log('❌ ' + name + ': ошибка ' + err.message);
+      throw new Error('Не удалось загрузить ' + name);
+    }
+  }
+
+  const durations = LAYER_NAMES.map(n => wavBuffers[n].duration);
+  const min = Math.min(...durations);
+  const max = Math.max(...durations);
+  if (max - min > 0.05) log('⚠️ Длины файлов различаются! Будет рассинхрон.');
+
+  startWavPlayback();
+}
+
+function startWavPlayback() {
+  stopWavPlayback();
+  const startAt = ctx.currentTime + 0.1;
+  for (const name of LAYER_NAMES) {
+    const src = ctx.createBufferSource();
+    src.buffer = wavBuffers[name];
+    src.loop = true;
+    src.connect(layers[name].gain);
+    src.start(startAt);
+    wavSources[name] = src;
+  }
+  applyIntensity(currentIntensity, 0.01, false);
+  log('🎵 Все 4 слоя играют. Эхо мелодии включается на скорости.');
+}
+
+function stopWavPlayback() {
+  for (const name of LAYER_NAMES) {
+    if (wavSources[name]) {
+      try { wavSources[name].stop(); } catch (e) {}
+      wavSources[name] = null;
+    }
+  }
+}
+
 document.getElementById('startBtn').addEventListener('click', async () => {
   const btn = document.getElementById('startBtn');
   if (!ctx) {
@@ -356,25 +353,11 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       initAudio();
       await ctx.resume();
 
-      if (typeof DeviceMotionEvent !== 'undefined'
-          && typeof DeviceMotionEvent.requestPermission === 'function') {
-        log('⏳ Запрашиваем доступ к датчику движения…');
-        try {
-          const perm = await DeviceMotionEvent.requestPermission();
-          if (perm === 'granted') {
-            window.addEventListener('devicemotion', handleMotion);
-            log('✅ Доступ к шагомеру разрешён');
-          } else {
-            log('⚠️ Доступ к шагомеру отклонён — используйте слайдер');
-          }
-        } catch (e) {
-          log('⚠️ Ошибка запроса доступа: ' + e.message);
-        }
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        const perm = await DeviceMotionEvent.requestPermission();
+        if (perm === 'granted') window.addEventListener('devicemotion', handleMotion);
       } else if (window.DeviceMotionEvent) {
         window.addEventListener('devicemotion', handleMotion);
-        log('✅ Шагомер подключён (Android/десктоп)');
-      } else {
-        log('ℹ️ Датчик движения не поддерживается — используйте слайдер');
       }
 
       document.getElementById('slider').disabled = false;
@@ -388,13 +371,11 @@ document.getElementById('startBtn').addEventListener('click', async () => {
 
       btn.textContent = '⏳ Загрузка…';
       btn.disabled = true;
-
       await loadAllWavs();
-
       btn.textContent = '⏸ Пауза';
       btn.disabled = false;
     } catch (e) {
-      log('❌ Ошибка запуска: ' + e.message);
+      log('❌ Ошибка: ' + e.message);
       btn.textContent = '▶️ Старт';
       btn.disabled = false;
     }
@@ -402,11 +383,9 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     if (ctx.state === 'running') {
       await ctx.suspend();
       btn.textContent = '▶️ Продолжить';
-      log('⏸ Пауза');
     } else {
       await ctx.resume();
       btn.textContent = '⏸ Пауза';
-      log('▶️ Продолжение');
     }
   }
 });
