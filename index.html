@@ -60,7 +60,7 @@
     font-family: monospace;
     font-size: 12px;
     padding: 12px;
-    height: 100px;
+    height: 80px;
     overflow-y: auto;
     border-radius: 8px;
     white-space: pre-wrap;
@@ -71,7 +71,7 @@
 <body>
 
 <h1>🏃 Адаптивная музыка (Live)</h1>
-<p>Нажмите <b>Старт</b> и выбирайте вариацию. Звук изменится мгновенно.</p>
+<p>Нажмите <b>Старт</b> и выбирайте вариацию. Звук изменится моментально.</p>
 
 <button id="startBtn">▶️ Старт</button>
 <button id="sliderResetBtn" style="display:none; background:#444; color:#fff;">🔄 Сбросить ручной темп</button>
@@ -97,7 +97,7 @@
 </div>
 
 <div class="bar-wrap"><div class="bar" id="intensityBar"></div></div>
-<div id="log">Готов к запуску. Нажмите «Старт».</div>
+<div id="log">Готов к запуску.</div>
 
 <script>
 // ============================================================
@@ -123,6 +123,7 @@ let sliderOverrideUntil = 0;
 let wavBuffers = {};
 let activeSources = {}; 
 let melodyDelay = null, melodyDelayFeedback = null, melodyDryGain = null, melodyWetGain = null;
+let sequencerTimer = null, isGenerating = false, beatCounter = 0;
 
 function initAudio() {
   ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -176,7 +177,7 @@ function setPlaybackSpeed(rate, fromSlider = false) {
   if (!ctx) return;
   rate = Math.max(1.0, Math.min(1.35, rate));
   const now = ctx.currentTime;
-  const rampTime = 0.5; 
+  const rampTime = 0.3; 
 
   for (const name in activeSources) {
     if (activeSources[name]) {
@@ -231,7 +232,6 @@ function handleMotion(event) {
 
 setInterval(() => {
   if (!motionActive || performance.now() < sliderOverrideUntil) return;
-
   const now = performance.now();
   stepTimestamps = stepTimestamps.filter(t => now - t < 4000); 
   const cadence = stepTimestamps.length * 15;
@@ -246,14 +246,14 @@ setInterval(() => {
 }, 500); 
 
 // ============================================================
-// 5. МГНОВЕННОЕ ПРИМЕНЕНИЕ ЭФФЕКТОВ (Фильтры и Эхо)
+// 5. МГНОВЕННЫЕ ЭФФЕКТЫ (Фильтры, эхо)
 // ============================================================
 function applyVariationFX(name, x) {
   if (!ctx) return;
   const now = ctx.currentTime;
-  const rampTime = 0.1; // Резкий отклик
+  const rampTime = 0.1; 
 
-  // Сброс к дефолту
+  // Дефолт
   layers.melody.filter.frequency.setTargetAtTime(4000, now, rampTime);
   layers.hat.filter.frequency.setTargetAtTime(3000, now, rampTime);
   layers.bass808.filter.frequency.setTargetAtTime(80 + 250 * x, now, rampTime);
@@ -261,30 +261,25 @@ function applyVariationFX(name, x) {
   melodyDryGain.gain.setTargetAtTime(1.0, now, rampTime);
 
   if (name === 'filter') {
-    // Глушим звук на медленной скорости
     const cutFreq = 300 + 3700 * x; 
     layers.melody.filter.frequency.setTargetAtTime(cutFreq, now, rampTime);
     layers.hat.filter.frequency.setTargetAtTime(1000 + 4000 * x, now, rampTime);
   }
   
   if (name === 'echo') {
-    // Много эха на средней скорости
     const echoAmt = x < 0.5 ? x * 1.2 : (1.0 - x) * 1.2; 
     melodyWetGain.gain.setTargetAtTime(echoAmt * 1.5, now, rampTime);
     melodyDryGain.gain.setTargetAtTime(1.0 - (echoAmt * 0.5), now, rampTime);
   }
 
   if (name === 'bass808') {
-    // Агрессивный бас
     layers.bass808.filter.frequency.setTargetAtTime(100 + 400 * x, now, rampTime);
   }
 }
 
 // ============================================================
-// 6. СЕКВЕНСОР (Генерация паттернов)
+// 6. СЕКВЕНСОР
 // ============================================================
-let sequencerTimer = null, isGenerating = false, beatCounter = 0;
-
 async function loadAllWavs() {
   for (const name of LAYER_NAMES) {
     try {
@@ -307,9 +302,20 @@ function playLayer(name, time, isIntro = false) {
   src.buffer = wavBuffers[name];
   src.loop = isIntro; 
   src.playbackRate.value = currentRate; 
+
   src.connect(layers[name].gain);
   src.start(time);
   activeSources[name] = src;
+}
+
+// Остановка всех звуков (для мгновенного сброса)
+function stopAllLayers() {
+  for (const name in activeSources) {
+    if (activeSources[name]) {
+      try { activeSources[name].stop(); } catch(e) {}
+      activeSources[name] = null;
+    }
+  }
 }
 
 function startIntro() {
@@ -319,7 +325,7 @@ function startIntro() {
   ['snare', 'hat', 'bass808'].forEach(n => layers[n].gain.gain.setValueAtTime(0, now));
 
   setTimeout(() => {
-    if (activeSources['melody']) try { activeSources['melody'].stop(); } catch(e){}
+    stopAllLayers();
     const startTime = ctx.currentTime + 0.05;
     LAYER_NAMES.forEach(n => {
       layers[n].gain.gain.setValueAtTime(1.0, startTime); 
@@ -347,17 +353,19 @@ function scheduleNextBar() {
 
   let play808 = false, playSnare = false, playHat = false;
 
-  // === ПЕРЕСТРОЙКА ЛОГИКИ ===
+  // === НАСТРОЙКА ПАТТЕРНОВ ===
   if (currentVariation === 'stems') {
     play808 = true; 
     playSnare = x > 0.3; 
     playHat = x > 0.6;   
   } 
   else if (currentVariation === 'halftime') {
-    play808 = Math.random() < 0.8;
+    // Жесткий Half-Time. 808 бьет всегда. 
+    play808 = true;
+    // Снейр и хэт только на четных тактах (размаз в 2 раза)
     if (x < 0.4) {
-      playSnare = beatCounter % 2 === 0; 
-      playHat = beatCounter % 2 === 0;
+      playSnare = (beatCounter % 2 === 0); 
+      playHat = (beatCounter % 4 === 0); // Хэт еще реже
     } else {
       playSnare = true;
       playHat = true;
@@ -365,8 +373,8 @@ function scheduleNextBar() {
   } 
   else if (currentVariation === 'bass808') {
     play808 = true;
-    playSnare = Math.random() < 0.15; 
-    playHat = Math.random() < 0.3;   
+    playSnare = Math.random() < 0.1; 
+    playHat = Math.random() < 0.2;   
   }
   else if (currentVariation === 'echo' || currentVariation === 'filter') {
     play808 = Math.random() < 0.8;
@@ -374,13 +382,11 @@ function scheduleNextBar() {
     playHat = Math.random() < (0.1 + (x * 0.8));
   }
   else {
-    // Стандарт
     play808 = Math.random() < 0.8;
     playSnare = Math.random() < (0.2 + (x * 0.7));
     playHat = Math.random() < (0.1 + (x * 0.8));
   }
 
-  // Громкость
   layers.bass808.gain.gain.setValueAtTime(play808 ? (0.2 + 0.8 * x) : 0, startTime);
   layers.snare.gain.gain.setValueAtTime(playSnare ? (0.1 + 0.8 * x) : 0, startTime);
   layers.hat.gain.gain.setValueAtTime(playHat ? (0.1 + 0.7 * x) : 0, startTime);
@@ -393,7 +399,7 @@ function scheduleNextBar() {
 }
 
 // ============================================================
-// 7. ИНТЕРФЕЙС
+// 7. ИНТЕРФЕЙС И МГНОВЕННОЕ ПЕРЕКЛЮЧЕНИЕ
 // ============================================================
 function log(msg) {
   const el = document.getElementById('log');
@@ -408,11 +414,42 @@ document.querySelectorAll('.var-btn').forEach(btn => {
     currentVariation = e.target.getAttribute('data-var');
     document.getElementById('modeState').textContent = e.target.textContent.trim();
     
-    // Принудительно применяем эффекты ПРЯМО СЕЙЧАС
-    if (ctx) {
-       applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
-    }
     log('🎛️ ' + currentVariation);
+
+    if (ctx && isGenerating) {
+      // 1. Мгновенно применяем эффекты (фильтры/эхо)
+      applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
+      
+      // 2. Убиваем текущий такт
+      clearTimeout(sequencerTimer);
+      stopAllLayers();
+      
+      // 3. Сразу же запускаем новый такт с новыми правилами
+      const now = ctx.currentTime;
+      const startTime = now + 0.02; 
+      const x = (currentRate - 1.0) / 0.35;
+      
+      // Вызываем логику генерации
+      layers.melody.gain.gain.setValueAtTime(0.8 - 0.2 * x, startTime);
+      playLayer('melody', startTime, false);
+      
+      let p808 = false, pSnare = false, pHat = false;
+      if (currentVariation === 'stems') { p808 = true; pSnare = x > 0.3; pHat = x > 0.6; } 
+      else if (currentVariation === 'halftime') { p808 = true; pSnare = true; pHat = false; } // Сразу даем понять
+      else if (currentVariation === 'bass808') { p808 = true; }
+      else { p808 = true; pSnare = true; pHat = true; }
+
+      layers.bass808.gain.gain.setValueAtTime(p808 ? (0.2 + 0.8 * x) : 0, startTime);
+      layers.snare.gain.gain.setValueAtTime(pSnare ? (0.1 + 0.8 * x) : 0, startTime);
+      layers.hat.gain.gain.setValueAtTime(pHat ? (0.1 + 0.7 * x) : 0, startTime);
+
+      if (p808) playLayer('bass808', startTime, false);
+      if (pSnare) playLayer('snare', startTime, false);
+      if (pHat) playLayer('hat', startTime, false);
+
+      // 4. Запускаем таймер для следующего такта
+      sequencerTimer = setTimeout(scheduleNextBar, (BEAT_DURATION / currentRate) * 1000);
+    }
   });
 });
 
