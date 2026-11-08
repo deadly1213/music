@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (melody / snare / hat / 808)</title>
+<title>Адаптивная музыка (Генеративный секвенсор)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -68,8 +68,8 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка (melody / snare / hat / 808)</h1>
-<p>Нажмите <b>Старт</b>. Код загрузит 4 файла. Идите или бегите: чем чаще шаги, тем сильнее эхо у мелодии и мощнее ритм.</p>
+<h1>🏃 Генеративная адаптивная музыка</h1>
+<p>Нажмите <b>Старт</b>. Первые 3 цикла играют все инструменты. Затем включается случайная генерация: мелодия и 808 всегда рядом, а ритм (снейр и хэт) добавляется в зависимости от интенсивности.</p>
 
 <button id="startBtn">▶️ Старт</button>
 
@@ -90,11 +90,10 @@
 
 <script>
 // ============================================================
-// 1. КОНФИГУРАЦИЯ СЛОЁВ И ИМЕНА ФАЙЛОВ
+// 1. КОНФИГУРАЦИЯ
 // ============================================================
 
 const LAYER_NAMES = ['melody', 'snare', 'hat', 'bass808'];
-
 const LAYER_FILES = {
   melody:  './melody.wav',
   snare:   './snare.wav',
@@ -102,21 +101,29 @@ const LAYER_FILES = {
   bass808: './808.wav'
 };
 
+// Приоритет для генератора (чем выше число, тем чаще играет)
+const LAYER_PRIORITY = {
+  melody:  100,
+  bass808: 80,
+  snare:   50,
+  hat:     30
+};
+
 // ============================================================
-// 2. АУДИО-ДВИЖОК (С добавлением Delay для мелодии)
+// 2. АУДИО-ДВИЖОК И ЭФФЕКТЫ
 // ============================================================
 
 let ctx = null;
 let masterGain = null;
 let limiter = null;
-let layers = null;
+let layers = null; // Здесь хранятся Gain и Filter для каждого слоя
 let currentIntensity = 0.3;
 let sliderOverrideUntil = 0;
 
 let wavBuffers = {};
-let wavSources = {};
+let activeSources = {}; // Текущие играющие источники (чтобы можно было их заглушать)
 
-// Эффекты для мелодии
+// Эффекты мелодии
 let melodyDelay = null;
 let melodyDelayFeedback = null;
 let melodyDryGain = null;
@@ -124,7 +131,6 @@ let melodyWetGain = null;
 
 function initAudio() {
   ctx = new (window.AudioContext || window.webkitAudioContext)();
-
   masterGain = ctx.createGain();
   masterGain.gain.value = 0.55;
 
@@ -137,60 +143,42 @@ function initAudio() {
   masterGain.connect(limiter).connect(ctx.destination);
 
   layers = {};
-
   for (const name of LAYER_NAMES) {
     const gain = ctx.createGain();
-    gain.gain.value = 0;
+    gain.gain.value = 0; // Изначально тихо
 
     const filter = ctx.createBiquadFilter();
-    if (name === 'melody') {
-      filter.type = 'lowpass';
-      filter.frequency.value = 4000;
-    } else if (name === 'snare') {
-      filter.type = 'highpass';
-      filter.frequency.value = 400;
-    } else if (name === 'hat') {
-      filter.type = 'highpass';
-      filter.frequency.value = 3000;
-    } else if (name === 'bass808') {
-      filter.type = 'lowpass';
-      filter.frequency.value = 80;
-    }
+    if (name === 'melody') { filter.type = 'lowpass'; filter.frequency.value = 4000; }
+    else if (name === 'snare') { filter.type = 'highpass'; filter.frequency.value = 400; }
+    else if (name === 'hat') { filter.type = 'highpass'; filter.frequency.value = 3000; }
+    else if (name === 'bass808') { filter.type = 'lowpass'; filter.frequency.value = 80; }
 
-    // Специальная цепочка эффектов для мелодии
+    // Настройка эха для мелодии
     if (name === 'melody') {
       melodyDelay = ctx.createDelay(1.0);
-      melodyDelay.delayTime.value = 0.35; // Эхо с задержкой (примерно 8-я нота при 120 BPM)
-      
+      melodyDelay.delayTime.value = 0.35;
       melodyDelayFeedback = ctx.createGain();
-      melodyDelayFeedback.gain.value = 0.4; // Длина хвоста эха
-
+      melodyDelayFeedback.gain.value = 0.4;
       melodyWetGain = ctx.createGain();
-      melodyWetGain.gain.value = 0; // Громкость эха (меняется интенсивностью)
-
+      melodyWetGain.gain.value = 0;
       melodyDryGain = ctx.createGain();
-      melodyDryGain.gain.value = 1.0; // Громкость сухого сигнала
+      melodyDryGain.gain.value = 1.0;
 
-      // Соединяем: Gain -> Filter -> Dry -> Master
       gain.connect(filter);
       filter.connect(melodyDryGain).connect(masterGain);
-
-      // Ответвление на эхо: Filter -> Delay -> Wet -> Master
       filter.connect(melodyDelay);
-      melodyDelay.connect(melodyDelayFeedback).connect(melodyDelay); // Петля фидбека
+      melodyDelay.connect(melodyDelayFeedback).connect(melodyDelay);
       melodyDelay.connect(melodyWetGain).connect(masterGain);
     } else {
       gain.connect(filter).connect(masterGain);
     }
-
     layers[name] = { gain, filter };
   }
-
   applyIntensity(currentIntensity, 0.01, false);
 }
 
 // ============================================================
-// 3. УПРАВЛЕНИЕ ИНТЕНСИВНОСТЬЮ
+// 3. УПРАВЛЕНИЕ ИНТЕНСИВНОСТЬЮ (Фильтры и Эхо)
 // ============================================================
 
 function applyIntensity(x, tau = 0.15, fromSlider = false) {
@@ -199,25 +187,16 @@ function applyIntensity(x, tau = 0.15, fromSlider = false) {
   currentIntensity = x;
   const now = ctx.currentTime;
 
-  // --- Громкость ---
-  layers.melody.gain.gain.setTargetAtTime(0.8 - 0.3 * x, now, tau);
-  layers.snare.gain.gain.setTargetAtTime(0.1 + 0.85 * x, now, tau);
-  layers.hat.gain.gain.setTargetAtTime(0.15 + 0.8 * x, now, tau);
-  layers.bass808.gain.gain.setTargetAtTime(0.05 + 0.9 * x, now, tau);
-
-  // --- Фильтры ---
-  layers.melody.filter.frequency.setTargetAtTime(4000 - 2800 * x, now, tau); 
+  // Фильтры меняются плавно
+  layers.melody.filter.frequency.setTargetAtTime(4000 - 2800 * x, now, tau);
   layers.snare.filter.frequency.setTargetAtTime(1200 - 1000 * x, now, tau);
   layers.hat.filter.frequency.setTargetAtTime(6000 - 4000 * x, now, tau);
   layers.bass808.filter.frequency.setTargetAtTime(80 + 320 * x, now, tau);
 
-  // --- Эффекты мелодии ---
-  // При x=0: эхо выключено (Wet=0), сухой звук на полную (Dry=1)
-  // При x=1: эхо на полную (Wet=0.6), сухой чуть тише (Dry=0.7) чтобы не было каши
-  if (melodyWetGain) melodyWetGain.gain.setTargetAtTime(x * 0.6, now, tau);
-  if (melodyDryGain) melodyDryGain.gain.setTargetAtTime(1.0 - 0.3 * x, now, tau);
+  // Эхо мелодии
+  melodyWetGain.gain.setTargetAtTime(x * 0.6, now, tau);
+  melodyDryGain.gain.setTargetAtTime(1.0 - 0.3 * x, now, tau);
 
-  // --- UI ---
   document.getElementById('intensity').textContent = x.toFixed(2);
   document.getElementById('intensityBar').style.width = (x * 100) + '%';
 
@@ -228,7 +207,7 @@ function applyIntensity(x, tau = 0.15, fromSlider = false) {
 }
 
 // ============================================================
-// 4. ШАГОМЕР (Повышенная чувствительность)
+// 4. ШАГОМЕР
 // ============================================================
 
 let motionActive = false;
@@ -237,8 +216,6 @@ let stepTimestamps = [];
 let totalSteps = 0;
 let lastStepTime = 0;
 let aboveThreshold = false;
-
-// Новые, более чувствительные пороги
 const THRESHOLD_HIGH = 11.2; 
 const THRESHOLD_LOW = 9.8;
 
@@ -249,17 +226,12 @@ function handleMotion(event) {
 
   motionEventCount++;
   if (motionEventCount < 3) return;
-
-  if (!motionActive) {
-    motionActive = true;
-    log('✅ Шагомер активен (повышенная чувствительность)');
-  }
+  if (!motionActive) { motionActive = true; log('✅ Шагомер активен'); }
 
   const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
-
   if (mag > THRESHOLD_HIGH && !aboveThreshold) {
     const now = performance.now();
-    if (now - lastStepTime > 200) { // 200мс = до 300 шагов в минуту
+    if (now - lastStepTime > 200) {
       lastStepTime = now;
       totalSteps++;
       stepTimestamps.push(now);
@@ -275,19 +247,122 @@ function handleMotion(event) {
 setInterval(() => {
   if (!motionActive) return;
   if (performance.now() < sliderOverrideUntil) return;
-
   const now = performance.now();
   stepTimestamps = stepTimestamps.filter(t => now - t < 5000);
   const cadence = stepTimestamps.length * 12;
-
   document.getElementById('cadence').textContent = cadence.toFixed(0);
-
   const x = Math.min(1, cadence / 180);
   applyIntensity(x);
 }, 1000);
 
 // ============================================================
-// 5. ЗАГРУЗКА WAV И ИНТЕРФЕЙС
+// 5. ГЕНЕРАТИВНЫЙ СЕКВЕНСОР
+// ============================================================
+
+let sequencerTimer = null;
+let barCount = 0;
+let loopDuration = 0; // Длительность одного файла в секундах
+
+async function loadAllWavs() {
+  log('⏳ Загрузка WAV…');
+  for (const name of LAYER_NAMES) {
+    try {
+      const response = await fetch(LAYER_FILES[name]);
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = await ctx.decodeAudioData(arrayBuffer);
+      wavBuffers[name] = buffer;
+      log('✅ ' + name);
+    } catch (err) {
+      log('❌ ' + name + ': ' + err.message);
+      throw new Error('Файл не найден: ' + LAYER_FILES[name]);
+    }
+  }
+  
+  // Определяем длину файла для таймера (берем мелодию как эталон)
+  loopDuration = wavBuffers.melody.duration;
+  log('🎵 Длина такта: ' + loopDuration.toFixed(2) + ' с.');
+  
+  startGenerativePlayback();
+}
+
+// Вспомогательная функция: запустить конкретный слой
+function playLayer(name, time) {
+  if (!wavBuffers[name]) return;
+  // Если старый источник еще играет, глушим его (чтобы избежать наложения)
+  if (activeSources[name]) {
+    try { activeSources[name].stop(time); } catch(e) {}
+  }
+  
+  const src = ctx.createBufferSource();
+  src.buffer = wavBuffers[name];
+  // ВАЖНО: мы отключаем loop здесь! Нам нужен один проход на такт.
+  src.loop = false; 
+  src.connect(layers[name].gain);
+  src.start(time);
+  activeSources[name] = src;
+
+  // Устанавливаем громкость для этого такта (зависит от интенсивности)
+  let vol = 0;
+  const x = currentIntensity;
+  if (name === 'melody') vol = 0.8 - 0.2 * x; // Мелодия всегда слышна
+  if (name === 'bass808') vol = 0.2 + 0.7 * x; // 808 громче при движении
+  if (name === 'snare') vol = 0.1 + 0.8 * x;   // Снейр появляется при движении
+  if (name === 'hat') vol = 0.1 + 0.7 * x;     // Хэт для скорости
+
+  // Плавно задаем громкость для этого проигрывания
+  layers[name].gain.gain.setTargetAtTime(vol, time, 0.05);
+}
+
+// Главная функция, которая решает, что играть прямо сейчас
+function scheduleNextBar() {
+  if (!ctx || ctx.state !== 'running') return;
+
+  const now = ctx.currentTime;
+  const startTime = now + 0.1; // Запускаем чуть в будущем для точности
+  
+  barCount++;
+  const x = currentIntensity;
+
+  if (barCount <= 3) {
+    // === ИНТРО: первые 3 раза играют ВСЕ файлы одновременно ===
+    log(`▶️ Такт ${barCount}: Играют все 4 инструмента`);
+    LAYER_NAMES.forEach(name => {
+      layers[name].gain.gain.setValueAtTime(1.0, startTime); // Полная громкость для интро
+      playLayer(name, startTime);
+    });
+  } else {
+    // === РАНДОМНЫЙ СЕКВЕНСОР (с 4-го такта) ===
+    log(`🎲 Такт ${barCount}: Генерация...`);
+    
+    // 1. Мелодия играет всегда (на первом плане)
+    playLayer('melody', startTime);
+
+    // 2. 808 играет с вероятностью 80% (на втором плане)
+    if (Math.random() < 0.8) playLayer('bass808', startTime);
+
+    // 3. Снейр играет с вероятностью, зависящей от интенсивности
+    // Если x = 0, вероятность 20%. Если x = 1, вероятность 90%.
+    const snareProb = 0.2 + (x * 0.7);
+    if (Math.random() < snareProb) playLayer('snare', startTime);
+
+    // 4. Хэт играет с вероятностью, зависящей от интенсивности
+    const hatProb = 0.1 + (x * 0.8);
+    if (Math.random() < hatProb) playLayer('hat', startTime);
+  }
+
+  // Планируем следующий такт ровно через длину файла
+  sequencerTimer = setTimeout(scheduleNextBar, loopDuration * 1000);
+}
+
+function startGenerativePlayback() {
+  log('🎵 Запуск секвенсора (3 такта интро + рандом).');
+  barCount = 0;
+  scheduleNextBar();
+}
+
+// ============================================================
+// 6. ИНТЕРФЕЙС
 // ============================================================
 
 function log(msg) {
@@ -295,55 +370,6 @@ function log(msg) {
   const line = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
   el.textContent = line + el.textContent;
   if (el.textContent.length > 4000) el.textContent = el.textContent.slice(0, 4000);
-}
-
-async function loadAllWavs() {
-  log('⏳ Загрузка 4 WAV-файлов…');
-  for (const name of LAYER_NAMES) {
-    try {
-      const url = LAYER_FILES[name];
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = await ctx.decodeAudioData(arrayBuffer);
-      wavBuffers[name] = buffer;
-      log('✅ ' + name + ': ' + buffer.duration.toFixed(2) + ' с');
-    } catch (err) {
-      log('❌ ' + name + ': ошибка ' + err.message);
-      throw new Error('Не удалось загрузить ' + name);
-    }
-  }
-
-  const durations = LAYER_NAMES.map(n => wavBuffers[n].duration);
-  const min = Math.min(...durations);
-  const max = Math.max(...durations);
-  if (max - min > 0.05) log('⚠️ Длины файлов различаются! Будет рассинхрон.');
-
-  startWavPlayback();
-}
-
-function startWavPlayback() {
-  stopWavPlayback();
-  const startAt = ctx.currentTime + 0.1;
-  for (const name of LAYER_NAMES) {
-    const src = ctx.createBufferSource();
-    src.buffer = wavBuffers[name];
-    src.loop = true;
-    src.connect(layers[name].gain);
-    src.start(startAt);
-    wavSources[name] = src;
-  }
-  applyIntensity(currentIntensity, 0.01, false);
-  log('🎵 Все 4 слоя играют. Эхо мелодии включается на скорости.');
-}
-
-function stopWavPlayback() {
-  for (const name of LAYER_NAMES) {
-    if (wavSources[name]) {
-      try { wavSources[name].stop(); } catch (e) {}
-      wavSources[name] = null;
-    }
-  }
 }
 
 document.getElementById('startBtn').addEventListener('click', async () => {
