@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (15 уровней)</title>
+<title>Адаптивная музыка (Интро соло + Дроп + Генерация)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -50,7 +50,7 @@
     overflow: hidden;
     margin: 10px 0 20px;
   }
-  .bar { height: 100%; background: linear-gradient(90deg,#2fbf71,#f0b429,#e74c3c); width: 30%; transition: width 0.15s; }
+  .bar { height: 100%; background: linear-gradient(90deg,#2fbf71,#f0b429,#e74c3c); width: 20%; transition: width 0.15s; }
   #log {
     background: #000;
     color: #4f4;
@@ -63,13 +63,12 @@
     white-space: pre-wrap;
     line-height: 1.4;
   }
-  .hint { font-size: 12px; color: #778; }
 </style>
 </head>
 <body>
 
-<h1>🏃 Генеративная музыка (15 уровней)</h1>
-<p>Нажмите <b>Старт</b>. Первые 3 такта — интро. Затем включается генерация. Теперь музыка реагирует на 15 уровней интенсивности плавно.</p>
+<h1>🏃 Генеративная музыка (Соло -> Дроп -> Рандом)</h1>
+<p>Нажмите <b>Старт</b>. Сначала 3 такта только мелодии, затем включаются все инструменты, после чего начинается генерация.</p>
 
 <button id="startBtn">▶️ Старт</button>
 
@@ -101,21 +100,25 @@ const LAYER_FILES = {
   bass808: './808.wav'
 };
 
+const BEAT_DURATION = 3.42; // Длительность одного такта
+const INTRO_BEATS = 3;      // Количество тактов в интро
+const INTRO_DURATION = BEAT_DURATION * INTRO_BEATS; // 10.26 секунд
+
 // ============================================================
-// 2. АУДИО-ДВИЖОК И ЭФФЕКТЫ
+// 2. АУДИО-ДВИЖОК
 // ============================================================
 
 let ctx = null;
 let masterGain = null;
 let limiter = null;
 let layers = null; 
-let currentLevel = 3; // Теперь это целое число от 1 до 15
+let currentLevel = 3; 
 let sliderOverrideUntil = 0;
 
 let wavBuffers = {};
 let activeSources = {}; 
 
-// Эффекты мелодии
+// Эффекты
 let melodyDelay = null;
 let melodyDelayFeedback = null;
 let melodyDryGain = null;
@@ -145,7 +148,6 @@ function initAudio() {
     else if (name === 'hat') { filter.type = 'highpass'; filter.frequency.value = 3000; }
     else if (name === 'bass808') { filter.type = 'lowpass'; filter.frequency.value = 80; }
 
-    // Настройка эха для мелодии
     if (name === 'melody') {
       melodyDelay = ctx.createDelay(1.0);
       melodyDelay.delayTime.value = 0.35;
@@ -170,23 +172,20 @@ function initAudio() {
 }
 
 // ============================================================
-// 3. УПРАВЛЕНИЕ 15 УРОВНЯМИ (Плавно)
+// 3. УПРАВЛЕНИЕ УРОВНЯМИ
 // ============================================================
 
 function setIntensityLevel(level, fromSlider = false) {
   if (!ctx) return;
   level = Math.max(1, Math.min(15, level));
-  
-  // Если уровень не изменился, ничего не делаем
   if (level === currentLevel && !fromSlider) return;
   
   currentLevel = level;
   const now = ctx.currentTime;
-  const rampTime = 0.8; // Плавный переход длиной 0.8 секунды
+  const rampTime = 0.8; 
 
   updateFilters(level, now, rampTime);
 
-  // Обновляем UI
   document.getElementById('intensity').textContent = level;
   document.getElementById('intensityBar').style.width = ((level / 15) * 100) + '%';
 
@@ -196,24 +195,18 @@ function setIntensityLevel(level, fromSlider = false) {
   }
 }
 
-// Вспомогательная функция для плавного применения фильтров и эха
 function updateFilters(level, now = ctx.currentTime, rampTime = 0.8) {
-  // Нормализуем уровень от 0.0 до 1.0 для удобства расчетов
   const x = (level - 1) / 14; 
-
-  // Фильтры (плавно через linearRampToValueAtTime)
   layers.melody.filter.frequency.linearRampToValueAtTime(4000 - 2800 * x, now + rampTime);
   layers.snare.filter.frequency.linearRampToValueAtTime(1200 - 1000 * x, now + rampTime);
   layers.hat.filter.frequency.linearRampToValueAtTime(6000 - 4000 * x, now + rampTime);
   layers.bass808.filter.frequency.linearRampToValueAtTime(80 + 320 * x, now + rampTime);
-
-  // Эхо мелодии (плавно)
   melodyWetGain.gain.linearRampToValueAtTime(x * 0.6, now + rampTime);
   melodyDryGain.gain.linearRampToValueAtTime(1.0 - 0.3 * x, now + rampTime);
 }
 
 // ============================================================
-// 4. ШАГОМЕР (Выдает 15 уровней)
+// 4. ШАГОМЕР
 // ============================================================
 
 let motionActive = false;
@@ -259,8 +252,6 @@ setInterval(() => {
   const cadence = stepTimestamps.length * 12;
   document.getElementById('cadence').textContent = cadence.toFixed(0);
 
-  // КАК РАССЧИТЫВАЮТСЯ 15 УРОВНЕЙ:
-  // 20 шагов/мин = 1-й уровень, 40 шагов/мин = 2-й уровень... 300 шагов/мин = 15-й.
   let level = Math.round(cadence / 20);
   if (level < 1) level = 1;
   if (level > 15) level = 15;
@@ -269,12 +260,11 @@ setInterval(() => {
 }, 1000);
 
 // ============================================================
-// 5. ГЕНЕРАТИВНЫЙ СЕКВЕНСОР (Разнообразие)
+// 5. ЛОГИКА ВОСПРОИЗВЕДЕНИЯ
 // ============================================================
 
 let sequencerTimer = null;
-let barCount = 0;
-let loopDuration = 0;
+let isGenerating = false;
 
 async function loadAllWavs() {
   log('⏳ Загрузка WAV…');
@@ -285,19 +275,17 @@ async function loadAllWavs() {
       const arrayBuffer = await response.arrayBuffer();
       const buffer = await ctx.decodeAudioData(arrayBuffer);
       wavBuffers[name] = buffer;
-      log('✅ ' + name);
+      log('✅ ' + name + ' (' + buffer.duration.toFixed(2) + ' с)');
     } catch (err) {
       log('❌ ' + name + ': ' + err.message);
       throw new Error('Файл не найден: ' + LAYER_FILES[name]);
     }
   }
   
-  loopDuration = wavBuffers.melody.duration;
-  log('🎵 Длина такта: ' + loopDuration.toFixed(2) + ' с.');
-  startGenerativePlayback();
+  startIntro();
 }
 
-function playLayer(name, time) {
+function playLayer(name, time, isIntro = false) {
   if (!wavBuffers[name]) return;
   if (activeSources[name]) {
     try { activeSources[name].stop(time); } catch(e) {}
@@ -305,63 +293,89 @@ function playLayer(name, time) {
   
   const src = ctx.createBufferSource();
   src.buffer = wavBuffers[name];
-  src.loop = false; 
+  src.loop = isIntro; // В интро мелодия зацикливается
   src.connect(layers[name].gain);
   src.start(time);
   activeSources[name] = src;
-
-  // Громкость для такта зависит от УРОВНЯ
-  const x = (currentLevel - 1) / 14; // 0.0 .. 1.0
-  let vol = 0;
-  
-  if (name === 'melody') vol = 0.8 - 0.2 * x;
-  if (name === 'bass808') vol = 0.2 + 0.7 * x;
-  if (name === 'snare') vol = 0.1 + 0.8 * x;
-  if (name === 'hat') vol = 0.1 + 0.7 * x;
-
-  // Плавная громкость для этого проигрывания
-  layers[name].gain.gain.setTargetAtTime(vol, time, 0.05);
 }
 
-function scheduleNextBar() {
-  if (!ctx || ctx.state !== 'running') return;
-
-  const now = ctx.currentTime;
-  const startTime = now + 0.1; 
+// --- 1. ИНТРО ---
+function startIntro() {
+  log('▶️ ИНТРО: Играет только мелодия (3 такта по ' + BEAT_DURATION + 'с).');
   
-  barCount++;
-  const x = (currentLevel - 1) / 14; // 0.0 .. 1.0
+  const now = ctx.currentTime;
+  
+  // Включаем только мелодию на полную громкость, зацикливаем её
+  layers.melody.gain.gain.setValueAtTime(1.0, now);
+  playLayer('melody', now, true); // true = зациклить
 
-  if (barCount <= 3) {
-    // ИНТРО
-    log(`▶️ Такт ${barCount}: Играют все 4`);
-    LAYER_NAMES.forEach(name => {
-      layers[name].gain.gain.setValueAtTime(1.0, startTime);
-      playLayer(name, startTime);
-    });
-  } else {
-    // ГЕНЕРАЦИЯ
-    // На низких уровнях (1-5) вероятность снейра/хэта низкая, на высоких (11-15) — почти 100%
-    log(`🎲 Такт ${barCount} (Ур. ${currentLevel}): Генерация...`);
-    
-    playLayer('melody', startTime); // Мелодия всегда
+  // Скрываем остальные слои
+  ['snare', 'hat', 'bass808'].forEach(name => {
+    layers[name].gain.gain.setValueAtTime(0, now);
+  });
 
-    if (Math.random() < 0.8) playLayer('bass808', startTime); // 808 часто
+  // Через 10.26 секунд запускаем дроп
+  setTimeout(() => {
+    log('🔥 ДРОП: Все 4 файла стартуют одновременно!');
+    startDrop();
+  }, INTRO_DURATION * 1000);
+}
 
-    const snareProb = 0.2 + (x * 0.7);
-    if (Math.random() < snareProb) playLayer('snare', startTime);
-
-    const hatProb = 0.1 + (x * 0.8);
-    if (Math.random() < hatProb) playLayer('hat', startTime);
+// --- 2. ДРОП (все одновременно) ---
+function startDrop() {
+  // Останавливаем зацикленную мелодию
+  if (activeSources['melody']) {
+    try { activeSources['melody'].stop(); } catch(e) {}
   }
 
-  sequencerTimer = setTimeout(scheduleNextBar, loopDuration * 1000);
+  const now = ctx.currentTime;
+  const startTime = now + 0.05; // Небольшая задержка для точности
+
+  // Запускаем все 4 файла с самого начала
+  LAYER_NAMES.forEach(name => {
+    layers[name].gain.gain.setValueAtTime(1.0, startTime); // Громкость на полную
+    playLayer(name, startTime, false); // false = без зацикливания (один такт)
+  });
+
+  // Как только дроп отыграл один такт (3.42 сек), включаем генератор
+  setTimeout(() => {
+    isGenerating = true;
+    log('🎲 КОНЕЦ ДРОПА: Включается генерация.');
+    scheduleNextBar();
+  }, BEAT_DURATION * 1000);
 }
 
-function startGenerativePlayback() {
-  log('🎵 Запуск секвенсора (3 такта интро + рандом).');
-  barCount = 0;
-  scheduleNextBar();
+// --- 3. ГЕНЕРАЦИЯ ---
+function scheduleNextBar() {
+  if (!ctx || ctx.state !== 'running' || !isGenerating) return;
+
+  const now = ctx.currentTime;
+  const startTime = now + 0.05;
+  
+  const x = (currentLevel - 1) / 14;
+
+  // Мелодия звучит всегда
+  layers.melody.gain.gain.setValueAtTime(0.8 - 0.2 * x, startTime);
+  playLayer('melody', startTime, false);
+
+  // Генерируем остальные слои
+  if (Math.random() < 0.8) {
+    layers.bass808.gain.gain.setValueAtTime(0.2 + 0.7 * x, startTime);
+    playLayer('bass808', startTime, false);
+  }
+  
+  if (Math.random() < (0.2 + (x * 0.7))) {
+    layers.snare.gain.gain.setValueAtTime(0.1 + 0.8 * x, startTime);
+    playLayer('snare', startTime, false);
+  }
+
+  if (Math.random() < (0.1 + (x * 0.8))) {
+    layers.hat.gain.gain.setValueAtTime(0.1 + 0.7 * x, startTime);
+    playLayer('hat', startTime, false);
+  }
+
+  // Планируем следующий такт
+  sequencerTimer = setTimeout(scheduleNextBar, BEAT_DURATION * 1000);
 }
 
 // ============================================================
