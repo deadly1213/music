@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (5 вариаций)</title>
+<title>Адаптивная музыка (5 вариаций Live)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -71,13 +71,14 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка (5 вариаций)</h1>
-<p>Нажмите <b>Старт</b> и выберите вариацию. Бегите или идите — музыка будет подстраиваться.</p>
+<h1>🏃 Адаптивная музыка (5 Live-вариаций)</h1>
+<p>Нажмите <b>Старт</b> и выбирайте вариацию. Звук изменится мгновенно.</p>
 
 <button id="startBtn">▶️ Старт</button>
 <button id="sliderResetBtn" style="display:none; background:#444; color:#fff;">🔄 Сбросить ручной темп</button>
 
 <div class="variations" id="variationsPanel" style="display:none;">
+  <button class="var-btn active" data-var="standard">Стандарт (Случайно)</button>
   <button class="var-btn" data-var="filter">🌑 Фильтр (Dark to Light)</button>
   <button class="var-btn" data-var="echo">🌪️ Эхо (Space)</button>
   <button class="var-btn" data-var="halftime">🥁 Half-Time (Размаз)</button>
@@ -126,13 +127,12 @@ let masterGain = null;
 let limiter = null;
 let layers = null; 
 let currentRate = 1.0;
-let currentVariation = 'standard'; // 'standard', 'filter', 'echo', 'halftime', 'bass808', 'stems'
+let currentVariation = 'standard'; 
 let sliderOverrideUntil = 0;
 
 let wavBuffers = {};
 let activeSources = {}; 
 
-// Эффекты
 let melodyDelay = null;
 let melodyDelayFeedback = null;
 let melodyDryGain = null;
@@ -182,11 +182,10 @@ function initAudio() {
     }
     layers[name] = { gain, filter };
   }
-  setPlaybackSpeed(1.0, true);
 }
 
 // ============================================================
-// 3. УПРАВЛЕНИЕ СКОРОСТЬЮ (Speed Up)
+// 3. УПРАВЛЕНИЕ СКОРОСТЬЮ
 // ============================================================
 
 function setPlaybackSpeed(rate, fromSlider = false) {
@@ -194,7 +193,7 @@ function setPlaybackSpeed(rate, fromSlider = false) {
   rate = Math.max(1.0, Math.min(1.35, rate));
   
   const now = ctx.currentTime;
-  const rampTime = 1.0; 
+  const rampTime = 0.5; 
 
   for (const name in activeSources) {
     if (activeSources[name]) {
@@ -258,7 +257,6 @@ function handleMotion(event) {
   }
 }
 
-// Обновляем темп и скорость каждые 500 мс
 setInterval(() => {
   if (!motionActive) return;
   if (performance.now() < sliderOverrideUntil) return;
@@ -279,48 +277,39 @@ setInterval(() => {
 }, 500); 
 
 // ============================================================
-// 5. ПРИМЕНЕНИЕ ВАРИАЦИЙ
+// 5. ПРИМЕНЕНИЕ ВАРИАЦИЙ (Эффекты)
 // ============================================================
 
-function applyVariation(name, x) {
-  // x = нормализованная скорость (0.0 до 1.0)
+function applyVariationFX(name, x) {
   const now = ctx.currentTime;
-  const rampTime = 0.5;
+  const rampTime = 0.1; // Мгновенный отклик при смене вариации
 
-  // Сброс к дефолтным значениям перед применением
+  // Сброс фильтров к базе
   layers.melody.filter.frequency.setTargetAtTime(4000, now, rampTime);
-  layers.snare.filter.frequency.setTargetAtTime(400, now, rampTime);
   layers.hat.filter.frequency.setTargetAtTime(3000, now, rampTime);
   layers.bass808.filter.frequency.setTargetAtTime(80 + 250 * x, now, rampTime);
   melodyWetGain.gain.setTargetAtTime(0.2, now, rampTime);
   melodyDryGain.gain.setTargetAtTime(1.0, now, rampTime);
 
-  // === ВАРИАЦИЯ 1: ФИЛЬТР (Dark to Light) ===
   if (name === 'filter') {
     const cutFreq = 500 + 3500 * x; 
     layers.melody.filter.frequency.setTargetAtTime(cutFreq, now, rampTime);
     layers.hat.filter.frequency.setTargetAtTime(1000 + 4000 * x, now, rampTime);
   }
   
-  // === ВАРИАЦИЯ 2: ЭХО (Space) ===
   if (name === 'echo') {
-    // Пик эха на средних оборотах
     const echoAmt = x < 0.5 ? x * 1.2 : (1.0 - x) * 1.2; 
     melodyWetGain.gain.setTargetAtTime(echoAmt * 0.8, now, rampTime);
     melodyDryGain.gain.setTargetAtTime(1.0 - (echoAmt * 0.4), now, rampTime);
   }
 
-  // === ВАРИАЦИЯ 4: 808 (Pressure) ===
   if (name === 'bass808') {
     layers.bass808.filter.frequency.setTargetAtTime(80 + 400 * x, now, rampTime);
   }
-
-  // Вариации 3 (Half-Time) и 5 (Stems) требуют изменения логики секвенсора.
-  // Они работают в функции scheduleNextBar.
 }
 
 // ============================================================
-// 6. ЛОГИКА СЕКВЕНСОРА И ВОСПРОИЗВЕДЕНИЯ
+// 6. ЛОГИКА СЕКВЕНСОРА (Меняется на лету)
 // ============================================================
 
 let sequencerTimer = null;
@@ -361,7 +350,7 @@ function playLayer(name, time, isIntro = false) {
 }
 
 function startIntro() {
-  log('▶️ ИНТРО (Оригинал).');
+  log('▶️ ИНТРО.');
   const now = ctx.currentTime;
   layers.melody.gain.gain.setValueAtTime(1.0, now);
   playLayer('melody', now, true); 
@@ -392,10 +381,10 @@ function scheduleNextBar() {
   const x = (currentRate - 1.0) / 0.35; 
   beatCounter++;
 
-  // Применяем эффекты вариации (фильтры, эхо, громкость 808)
-  applyVariation(currentVariation, x);
+  // Обновляем фильтры/эффекты под текущую вариацию и скорость
+  applyVariationFX(currentVariation, x);
 
-  // --- Базовая громкость ---
+  // Мелодия играет всегда
   layers.melody.gain.gain.setValueAtTime(0.8 - 0.2 * x, startTime);
   playLayer('melody', startTime, false);
 
@@ -403,19 +392,19 @@ function scheduleNextBar() {
   let playSnare = false;
   let playHat = false;
 
-  // === ЛОГИКА ВАРИАЦИЙ ===
+  // === ГЛАВНАЯ ЛОГИКА ВАРИАЦИЙ ===
   
   if (currentVariation === 'stems') {
-    // ВАРИАЦИЯ 5: Слои
-    play808 = true; // 808 есть всегда
-    playSnare = x > 0.3; // Снейр при легком беге
-    playHat = x > 0.6;   // Хэт при спринте
+    // 1. Слои (Stems)
+    play808 = true; 
+    playSnare = x > 0.3; 
+    playHat = x > 0.6;   
   } 
   else if (currentVariation === 'halftime') {
-    // ВАРИАЦИЯ 3: Half-Time (Размаз)
+    // 2. Half-Time (Размаз)
     play808 = Math.random() < 0.8;
-    // Если медленно (x < 0.4), хэт играет через такт, снейр редко
     if (x < 0.4) {
+      // На медленной скорости режем ритм пополам
       playSnare = beatCounter % 2 === 0; 
       playHat = beatCounter % 2 === 0;
     } else {
@@ -423,8 +412,20 @@ function scheduleNextBar() {
       playHat = true;
     }
   } 
+  else if (currentVariation === 'bass808') {
+    // 3. 808 Pressure (только бас, минимум ритма)
+    play808 = true;
+    playSnare = Math.random() < (0.1 + (x * 0.3)); // Снейр звучит реже
+    playHat = Math.random() < (0.2 + (x * 0.4));   // Хэт звучит реже
+  }
+  else if (currentVariation === 'echo' || currentVariation === 'filter') {
+    // 4 и 5. Эхо и Фильтр (обычный ритм, но эффекты делают магию)
+    play808 = Math.random() < 0.8;
+    playSnare = Math.random() < (0.2 + (x * 0.7));
+    playHat = Math.random() < (0.1 + (x * 0.8));
+  }
   else {
-    // Все остальные вариации (или стандарт): случайная генерация
+    // Стандарт (Случайно)
     play808 = Math.random() < 0.8;
     playSnare = Math.random() < (0.2 + (x * 0.7));
     playHat = Math.random() < (0.1 + (x * 0.8));
@@ -457,7 +458,7 @@ function scheduleNextBar() {
 }
 
 // ============================================================
-// 7. ИНТЕРФЕЙС И УПРАВЛЕНИЕ
+// 7. ИНТЕРФЕЙС
 // ============================================================
 
 function log(msg) {
@@ -467,18 +468,24 @@ function log(msg) {
   if (el.textContent.length > 2000) el.textContent = el.textContent.slice(0, 2000);
 }
 
-// Переключение вариаций по кнопкам
+// Переключение вариаций
 document.querySelectorAll('.var-btn').forEach(btn => {
   btn.addEventListener('click', (e) => {
+    // Снимаем активный класс со всех
     document.querySelectorAll('.var-btn').forEach(b => b.classList.remove('active'));
+    // Ставим на нажатую
     e.target.classList.add('active');
     
+    // Меняем переменную
     currentVariation = e.target.getAttribute('data-var');
     document.getElementById('modeState').textContent = e.target.textContent.replace(/[^\w\sа-яА-Я]/g, '').trim();
     
-    // Сбрасываем ручной слайдер, чтобы управление вернулось к шагомеру
-    sliderOverrideUntil = 0; 
-    log('🎛️ Вариация: ' + currentVariation);
+    log('🎛️ Смена вариации на: ' + currentVariation);
+    
+    // Чтобы эффект применился моментально, вызываем функцию принудительно
+    if (ctx && currentRate) {
+       applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
+    }
   });
 });
 
