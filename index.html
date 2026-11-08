@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Адаптивная музыка для тренировки (PoC)</title>
+<style>
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0e0e12;
+    color: #eaeaea;
+    margin: 0 auto;
+    padding: 20px;
+    max-width: 680px;
+  }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  p  { color: #aab; font-size: 14px; line-height: 1.5; }
+  button {
+    padding: 14px 20px;
+    font-size: 16px;
+    margin: 6px 6px 6px 0;
+    border-radius: 10px;
+    border: none;
+    background: #2fbf71;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:disabled { background: #444; cursor: not-allowed; }
+  button.secondary { background: #556; }
+  .slider-row { margin: 18px 0; }
+  input[type=range] { width: 100%; height: 30px; }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 16px 0;
+  }
+  .stat {
+    background: #1a1a22;
+    padding: 12px;
+    border-radius: 10px;
+    text-align: center;
+  }
+  .stat small { color: #889; font-size: 12px; display: block; margin-bottom: 4px; }
+  .stat b { font-size: 24px; color: #2fbf71; }
+  .bar-wrap {
+    background: #1a1a22;
+    height: 14px;
+    border-radius: 7px;
+    overflow: hidden;
+    margin: 10px 0 20px;
+  }
+  .bar { height: 100%; background: linear-gradient(90deg,#2fbf71,#f0b429,#e74c3c); width: 30%; transition: width 0.15s; }
+  #log {
+    background: #000;
+    color: #4f4;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 12px;
+    height: 200px;
+    overflow-y: auto;
+    border-radius: 8px;
+    white-space: pre-wrap;
+    line-height: 1.4;
+  }
+  .hint { font-size: 12px; color: #778; }
+</style>
+</head>
+<body>
+
+<h1>🏃 Адаптивная музыка для тренировки</h1>
+<p>Нажмите <b>Старт</b>. На телефоне ходите или бегите — музыка будет подстраиваться под вашу активность. На компьютере двигайте слайдер.</p>
+
+<button id="startBtn">▶️ Старт</button>
+<button id="hrBtn" class="secondary" disabled>❤️ Подключить пульсометр</button>
+
+<div class="slider-row">
+  <label>Интенсивность вручную: <span id="sliderVal">0.30</span></label>
+  <input type="range" id="slider" min="0" max="1" step="0.01" value="0.3" disabled>
+</div>
+
+<div class="stats">
+  <div class="stat"><small>Пульс</small><b id="hr">—</b></div>
+  <div class="stat"><small>Шагов/мин</small><b id="cadence">—</b></div>
+  <div class="stat"><small>Интенсивность</small><b id="intensity">0.30</b></div>
+</div>
+
+<div class="bar-wrap"><div class="bar" id="intensityBar"></div></div>
+
+<div id="log">Готов к запуску. Нажмите «Старт».</div>
+
+<p class="hint">Совет: для теста на телефоне откройте страницу по HTTPS (например, через GitHub Pages) — иначе iOS не даст доступ к датчику движения.</p>
+
+<script>
+// ============================================================
+// 1. МУЗЫКАЛЬНЫЙ ДВИЖОК
+// ============================================================
+
+const BPM = 120;
+const BEAT = 60 / BPM;
+const SIXTEENTH = BEAT / 4;
+const SCHEDULE_AHEAD = 0.1;
+const SCHEDULER_MS = 25;
+
+const CHORDS = [
+  { notes: [45, 48, 52, 57], bass: 33 },
+  { notes: [41, 45, 48, 53], bass: 29 },
+  { notes: [48, 52, 55, 60], bass: 36 },
+  { notes: [43, 47, 50, 55], bass: 31 }
+];
+
+let ctx = null;
+let masterGain = null;
+let limiter = null;
+let layers = null;
+let noiseBuffer = null;
+let schedulerTimer = null;
+let nextNoteTime = 0;
+let step16 = 0;
+let currentIntensity = 0.3;
+let sliderOverrideUntil = 0;
+
+function midiToFreq(m) {
+  return 440 * Math.pow(2, (m - 69) / 12);
+}
+
+function getNoiseBuffer() {
+  if (noiseBuffer) return noiseBuffer;
+  const len = Math.floor(ctx.sampleRate * 0.1);
+  noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  return noiseBuffer;
+}
+
+function playKick(time) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.frequency.setValueAtTime(150, time);
+  osc.frequency.exponentialRampToValueAtTime(45, time + 0.1);
+  gain.gain.setValueAtTime(0.9, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
+  osc.connect(gain).connect(layers.drums.gain);
+  osc.start(time);
+  osc.stop(time + 0.2);
+}
+
+function playHat(time) {
+  const src = ctx.createBufferSource();
+  src.buffer = getNoiseBuffer();
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 7000;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.22, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+  src.connect(hp).connect(gain).connect(layers.drums.gain);
+  src.start(time);
+  src.stop(time + 0.06);
+}
+
+function playBass(time, midi) {
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.value = midiToFreq(midi);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(900, time);
+  lp.frequency.exponentialRampToValueAtTime(200, time + 0.2);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.5, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
+  osc.connect(lp).connect(gain).connect(layers.bass.gain);
+  osc.start(time);
+  osc.stop(time + 0.3);
+}
+
+function playPad(time, notes, duration) {
+  notes.forEach((midi) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = midiToFreq(midi);
+    osc.detune.value = (Math.random() - 0.5) * 12;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1300;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(0.08, time + 0.4);
+    gain.gain.linearRampToValueAtTime(0.0001, time + duration);
+    osc.connect(lp).connect(gain).connect(layers.pad.gain);
+    osc.start(time);
+    osc.stop(time + duration + 0.05);
+  });
+}
+
+function playArp(time, midi) {
+  const osc = ctx.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.value = midiToFreq(midi);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.3, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+  osc.connect(gain).connect(layers.arp.gain);
+  osc.start(time);
+  osc.stop(time + 0.15);
+}
+
+function scheduleNote(step, time) {
+  const bar = Math.floor(step / 16) % 4;
+  const s = step % 16;
+  const chord = CHORDS[bar];
+
+  if (s === 0 || s === 4 || s === 8 || s === 12) playKick(time);
+  if (s === 2 || s === 6 || s === 10 || s === 14) playHat(time);
+  if (s === 0 || s === 4 || s === 8 || s === 12) playBass(time, chord.bass);
+  if (s === 0) playPad(time, chord.notes, BEAT * 4 * 0.95);
+  if (s % 2 === 0) {
+    const idx = (s / 2) % chord.notes.length;
+    playArp(time, chord.notes[idx] + 12);
+  }
+}
+
+function scheduler() {
+  while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD) {
+    scheduleNote(step16, nextNoteTime);
+    nextNoteTime += SIXTEENTH;
+    step16++;
+  }
+}
+
+function initAudio() {
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+  masterGain = ctx.createGain();
+  masterGain.gain.value = 0.55;
+
+  limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -8;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.1;
+
+  masterGain.connect(limiter).connect(ctx.destination);
+
+  layers = {};
+  for (const name of ['drums', 'bass', 'pad', 'arp']) {
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    g.connect(masterGain);
+    layers[name] = { gain: g };
+  }
+
+  step16 = 0;
+  nextNoteTime = ctx.currentTime + 0.1;
+  schedulerTimer = setInterval(scheduler, SCHEDULER_MS);
+
+  applyIntensity(currentIntensity, 0.01, false);
+}
+
+// ============================================================
+// 2. УПРАВЛЕНИЕ ИНТЕНСИВНОСТЬЮ
+// ============================================================
+
+function applyIntensity(x, tau = 0.15, fromSlider = false) {
+  if (!ctx) return;
+  x = Math.max(0, Math.min(1, x));
+  currentIntensity = x;
+  const now = ctx.currentTime;
+
+  layers.drums.gain.gain.setTargetAtTime(0.35 + 0.65 * x, now, tau);
+  layers.bass.gain.gain.setTargetAtTime(0.9 * x, now, tau);
+  layers.pad.gain.gain.setTargetAtTime(0.7 - 0.55 * x, now, tau);
+  layers.arp.gain.gain.setTargetAtTime(Math.max(0, (x - 0.4) / 0.6) * 0.8, now, tau);
+
+  document.getElementById('intensity').textContent = x.toFixed(2);
+  document.getElementById('intensityBar').style.width = (x * 100) + '%';
+
+  if (!fromSlider) {
+    document.getElementById('slider').value = x;
+    document.getElementById('sliderVal').textContent = x.toFixed(2);
+  }
+}
+
+// ============================================================
+// 3. ДАТЧИК ДВИЖЕНИЯ (шаги)
+// ============================================================
+
+let motionActive = false;
+let motionEventCount = 0;
+let stepTimestamps = [];
+let lastStepTime = 0;
+let aboveThreshold = false;
+
+function handleMotion(event) {
+  if (performance.now() < sliderOverrideUntil) return;
+  const acc = event.accelerationIncludingGravity;
+  if (!acc) return;
+
+  motionEventCount++;
+  if (motionEventCount < 3) return;
+
+  if (!motionActive) {
+    motionActive = true;
+    log('✅ Датчик движения активен');
+  }
+
+  const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+  const HIGH = 13.0;
+  const LOW = 10.5;
+
+  if (mag > HIGH && !aboveThreshold) {
+    const now = performance.now();
+    if (now - lastStepTime > 250) {
+      lastStepTime = now;
+      stepTimestamps.push(now);
+      if (stepTimestamps.length > 50) stepTimestamps.shift();
+    }
+    aboveThreshold = true;
+  } else if (mag < LOW) {
+    aboveThreshold = false;
+  }
+}
+
+setInterval(() => {
+  if (!motionActive) return;
+  if (hrConnected) return;
+  if (performance.now() < sliderOverrideUntil) return;
+
+  const now = performance.now();
+  stepTimestamps = stepTimestamps.filter(t => now - t < 5000);
+  const cadence = stepTimestamps.length * 12;
+
+  document.getElementById('cadence').textContent = cadence.toFixed(0);
+
+  const x = Math.min(1, cadence / 180);
+  applyIntensity(x);
+}, 1000);
+
+// ============================================================
+// 4. ПУЛЬСОМЕТР
+// ============================================================
+
+let hrConnected = false;
+let currentHR = 0;
+
+async function connectHR() {
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: ['heart_rate'] }]
+    });
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService('heart_rate');
+    const ch = await service.getCharacteristic('heart_rate_measurement');
+    await ch.startNotifications();
+
+    ch.addEventListener('characteristicvaluechanged', (ev) => {
+      const v = ev.target.value;
+      const flags = v.getUint8(0);
+      const hr = (flags & 0x01) ? v.getUint16(1, true) : v.getUint8(1);
+      currentHR = hr;
+      document.getElementById('hr').textContent = hr;
+      const x = Math.max(0, Math.min(1, (hr - 70) / 100));
+      applyIntensity(x, 0.15, false);
+    });
+
+    hrConnected = true;
+    log('✅ Пульсометр подключён (' + (device.name || 'BLE') + ')');
+  } catch (err) {
+    log('❌ Ошибка подключения пульсометра: ' + err.message);
+  }
+}
+
+// ============================================================
+// 5. ИНТЕРФЕЙС
+// ============================================================
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const line = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
+  el.textContent = line + el.textContent;
+  if (el.textContent.length > 4000) el.textContent = el.textContent.slice(0, 4000);
+}
+
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('startBtn');
+  if (!ctx) {
+    try {
+      initAudio();
+      await ctx.resume();
+
+      if (typeof DeviceMotionEvent !== 'undefined'
+          && typeof DeviceMotionEvent.requestPermission === 'function') {
+        try {
+          const perm = await DeviceMotionEvent.requestPermission();
+          if (perm === 'granted') {
+            window.addEventListener('devicemotion', handleMotion);
+            log('✅ Разрешение на датчик движения получено');
+          } else {
+            log('⚠️ Датчик движения не разрешён — используйте слайдер');
+          }
+        } catch (e) {
+          log('⚠️ Ошибка доступа к датчику: ' + e.message);
+        }
+      } else if (window.DeviceMotionEvent) {
+        window.addEventListener('devicemotion', handleMotion);
+        log('ℹ️ Датчик движения доступен (активируется при реальном движении)');
+      } else {
+        log('ℹ️ Датчик движения не поддерживается — используйте слайдер');
+      }
+
+      const hrBtn = document.getElementById('hrBtn');
+      if (navigator.bluetooth) {
+        hrBtn.disabled = false;
+        log('ℹ️ Web Bluetooth доступен — можно подключить пульсометр');
+      } else {
+        log('ℹ️ Web Bluetooth недоступен (Safari/iOS) — пульсометр пропускаем');
+      }
+
+      document.getElementById('slider').disabled = false;
+      document.getElementById('slider').addEventListener('input', (e) => {
+        if (!ctx) return;
+        sliderOverrideUntil = performance.now() + 5000;
+        const v = parseFloat(e.target.value);
+        document.getElementById('sliderVal').textContent = v.toFixed(2);
+        applyIntensity(v, 0.05, true);
+      });
+
+      btn.textContent = '⏸ Пауза';
+      log('🎵 Музыка запущена');
+    } catch (e) {
+      log('❌ Ошибка запуска: ' + e.message);
+    }
+  } else {
+    if (ctx.state === 'running') {
+      await ctx.suspend();
+      btn.textContent = '▶️ Продолжить';
+      log('⏸ Пауза');
+    } else {
+      await ctx.resume();
+      btn.textContent = '⏸ Пауза';
+      log('▶️ Продолжение');
+    }
+  }
+});
+
+document.getElementById('hrBtn').addEventListener('click', connectHR);
+</script>
+</body>
+</html>
