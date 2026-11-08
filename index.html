@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Speed Up от 130 шагов)</title>
+<title>Адаптивная музыка (5 вариаций)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -16,19 +16,23 @@
   h1 { font-size: 22px; margin-bottom: 6px; }
   p  { color: #aab; font-size: 14px; line-height: 1.5; }
   button {
-    padding: 14px 20px;
-    font-size: 16px;
+    padding: 12px 16px;
+    font-size: 14px;
     margin: 6px 6px 6px 0;
     border-radius: 10px;
-    border: none;
-    background: #2fbf71;
-    color: #fff;
+    border: 1px solid #333;
+    background: #1a1a22;
+    color: #ccc;
     cursor: pointer;
     font-weight: 600;
+    transition: all 0.2s;
   }
-  button:disabled { background: #444; cursor: not-allowed; }
-  .slider-row { margin: 18px 0; }
-  input[type=range] { width: 100%; height: 30px; }
+  button:hover { background: #2a2a36; }
+  button.active { background: #2fbf71; color: #000; border-color: #2fbf71; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  
+  .variations { margin: 20px 0; }
+  
   .stats {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -42,7 +46,7 @@
     text-align: center;
   }
   .stat small { color: #889; font-size: 12px; display: block; margin-bottom: 4px; }
-  .stat b { font-size: 24px; color: #2fbf71; }
+  .stat b { font-size: 20px; color: #2fbf71; }
   .bar-wrap {
     background: #1a1a22;
     height: 14px;
@@ -57,7 +61,7 @@
     font-family: monospace;
     font-size: 12px;
     padding: 12px;
-    height: 150px;
+    height: 100px;
     overflow-y: auto;
     border-radius: 8px;
     white-space: pre-wrap;
@@ -67,20 +71,29 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка (Speed Up)</h1>
-<p>Нажмите <b>Старт</b>. До 130 шагов — оригинал. Выше — плавный разгон до 1.35x.</p>
+<h1>🏃 Адаптивная музыка (5 вариаций)</h1>
+<p>Нажмите <b>Старт</b> и выберите вариацию. Бегите или идите — музыка будет подстраиваться.</p>
 
 <button id="startBtn">▶️ Старт</button>
+<button id="sliderResetBtn" style="display:none; background:#444; color:#fff;">🔄 Сбросить ручной темп</button>
 
-<div class="slider-row">
-  <label>Темп вручную: <span id="sliderVal">1.00x</span></label>
-  <input type="range" id="slider" min="1.00" max="1.35" step="0.01" value="1.00" disabled>
+<div class="variations" id="variationsPanel" style="display:none;">
+  <button class="var-btn" data-var="filter">🌑 Фильтр (Dark to Light)</button>
+  <button class="var-btn" data-var="echo">🌪️ Эхо (Space)</button>
+  <button class="var-btn" data-var="halftime">🥁 Half-Time (Размаз)</button>
+  <button class="var-btn" data-var="bass808">🔊 808 (Pressure)</button>
+  <button class="var-btn" data-var="stems">🎚️ Слои (Stems)</button>
+</div>
+
+<div class="slider-row" style="margin: 18px 0;">
+  <label>Скорость вручную (Speed Up): <span id="sliderVal">1.00x</span></label>
+  <input type="range" id="slider" min="1.00" max="1.35" step="0.01" value="1.00" disabled style="width:100%;">
 </div>
 
 <div class="stats">
   <div class="stat"><small>Шагов/мин</small><b id="cadence">0</b></div>
   <div class="stat"><small>Скорость</small><b id="playbackRate">1.00x</b></div>
-  <div class="stat"><small>Состояние</small><b id="modeState">Normal</b></div>
+  <div class="stat"><small>Активна вариация</small><b id="modeState" style="font-size:16px;">Стандарт</b></div>
 </div>
 
 <div class="bar-wrap"><div class="bar" id="intensityBar"></div></div>
@@ -113,11 +126,13 @@ let masterGain = null;
 let limiter = null;
 let layers = null; 
 let currentRate = 1.0;
+let currentVariation = 'standard'; // 'standard', 'filter', 'echo', 'halftime', 'bass808', 'stems'
 let sliderOverrideUntil = 0;
 
 let wavBuffers = {};
 let activeSources = {}; 
 
+// Эффекты
 let melodyDelay = null;
 let melodyDelayFeedback = null;
 let melodyDryGain = null;
@@ -171,7 +186,7 @@ function initAudio() {
 }
 
 // ============================================================
-// 3. УПРАВЛЕНИЕ СКОРОСТЬЮ (Speed Up от 130 шагов)
+// 3. УПРАВЛЕНИЕ СКОРОСТЬЮ (Speed Up)
 // ============================================================
 
 function setPlaybackSpeed(rate, fromSlider = false) {
@@ -179,26 +194,17 @@ function setPlaybackSpeed(rate, fromSlider = false) {
   rate = Math.max(1.0, Math.min(1.35, rate));
   
   const now = ctx.currentTime;
-  const rampTime = 1.5; 
+  const rampTime = 1.0; 
 
   for (const name in activeSources) {
     if (activeSources[name]) {
       activeSources[name].playbackRate.linearRampToValueAtTime(rate, now + rampTime);
     }
   }
-
-  const x = (rate - 1.0) / 0.35; // Нормализация от 0 до 1
-  layers.melody.filter.frequency.linearRampToValueAtTime(4000 + 2000 * x, now + rampTime);
-  layers.bass808.filter.frequency.linearRampToValueAtTime(80 + 250 * x, now + rampTime);
-  melodyWetGain.gain.linearRampToValueAtTime(0.2 + 0.3 * x, now + rampTime);
-
   currentRate = rate;
 
   document.getElementById('playbackRate').textContent = rate.toFixed(2) + 'x';
-  const barWidth = ((rate - 1.0) / 0.35) * 100;
-  document.getElementById('intensityBar').style.width = barWidth + '%';
-
-  document.getElementById('modeState').textContent = rate > 1.01 ? 'Speed Up' : 'Normal';
+  document.getElementById('intensityBar').style.width = ((rate - 1.0) / 0.35) * 100 + '%';
 
   if (!fromSlider) {
     document.getElementById('slider').value = rate;
@@ -228,7 +234,7 @@ function handleMotion(event) {
 
   motionEventCount++;
   if (motionEventCount < 3) return;
-  if (!motionActive) { motionActive = true; log('✅ Шагомер активен'); }
+  if (!motionActive) { motionActive = true; }
 
   const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
   
@@ -252,6 +258,7 @@ function handleMotion(event) {
   }
 }
 
+// Обновляем темп и скорость каждые 500 мс
 setInterval(() => {
   if (!motionActive) return;
   if (performance.now() < sliderOverrideUntil) return;
@@ -261,30 +268,66 @@ setInterval(() => {
   const cadence = stepTimestamps.length * 15;
   document.getElementById('cadence').textContent = cadence.toFixed(0);
 
-  // --- ЛОГИКА SPEED UP (ОТ 130 ДО 200 ШАГОВ) ---
   let targetRate = 1.0;
-  
   if (cadence > 130) {
-    // Если больше 130 шагов/мин -> ускоряем.
-    // 130 шагов = 1.0x, 200 шагов = 1.35x
     const speedFactor = (cadence - 130) / 70; 
     targetRate = 1.0 + (speedFactor * 0.35); 
   }
-  
   targetRate = Math.max(1.0, Math.min(1.35, targetRate));
   setPlaybackSpeed(targetRate);
   
 }, 500); 
 
 // ============================================================
-// 5. ЛОГИКА ВОСПРОИЗВЕДЕНИЯ
+// 5. ПРИМЕНЕНИЕ ВАРИАЦИЙ
+// ============================================================
+
+function applyVariation(name, x) {
+  // x = нормализованная скорость (0.0 до 1.0)
+  const now = ctx.currentTime;
+  const rampTime = 0.5;
+
+  // Сброс к дефолтным значениям перед применением
+  layers.melody.filter.frequency.setTargetAtTime(4000, now, rampTime);
+  layers.snare.filter.frequency.setTargetAtTime(400, now, rampTime);
+  layers.hat.filter.frequency.setTargetAtTime(3000, now, rampTime);
+  layers.bass808.filter.frequency.setTargetAtTime(80 + 250 * x, now, rampTime);
+  melodyWetGain.gain.setTargetAtTime(0.2, now, rampTime);
+  melodyDryGain.gain.setTargetAtTime(1.0, now, rampTime);
+
+  // === ВАРИАЦИЯ 1: ФИЛЬТР (Dark to Light) ===
+  if (name === 'filter') {
+    const cutFreq = 500 + 3500 * x; 
+    layers.melody.filter.frequency.setTargetAtTime(cutFreq, now, rampTime);
+    layers.hat.filter.frequency.setTargetAtTime(1000 + 4000 * x, now, rampTime);
+  }
+  
+  // === ВАРИАЦИЯ 2: ЭХО (Space) ===
+  if (name === 'echo') {
+    // Пик эха на средних оборотах
+    const echoAmt = x < 0.5 ? x * 1.2 : (1.0 - x) * 1.2; 
+    melodyWetGain.gain.setTargetAtTime(echoAmt * 0.8, now, rampTime);
+    melodyDryGain.gain.setTargetAtTime(1.0 - (echoAmt * 0.4), now, rampTime);
+  }
+
+  // === ВАРИАЦИЯ 4: 808 (Pressure) ===
+  if (name === 'bass808') {
+    layers.bass808.filter.frequency.setTargetAtTime(80 + 400 * x, now, rampTime);
+  }
+
+  // Вариации 3 (Half-Time) и 5 (Stems) требуют изменения логики секвенсора.
+  // Они работают в функции scheduleNextBar.
+}
+
+// ============================================================
+// 6. ЛОГИКА СЕКВЕНСОРА И ВОСПРОИЗВЕДЕНИЯ
 // ============================================================
 
 let sequencerTimer = null;
 let isGenerating = false;
+let beatCounter = 0;
 
 async function loadAllWavs() {
-  log('⏳ Загрузка WAV…');
   for (const name of LAYER_NAMES) {
     try {
       const response = await fetch(LAYER_FILES[name]);
@@ -292,13 +335,12 @@ async function loadAllWavs() {
       const arrayBuffer = await response.arrayBuffer();
       const buffer = await ctx.decodeAudioData(arrayBuffer);
       wavBuffers[name] = buffer;
-      log('✅ ' + name + ' (' + buffer.duration.toFixed(2) + ' с)');
     } catch (err) {
-      log('❌ ' + name + ': ' + err.message);
-      throw new Error('Файл не найден: ' + LAYER_FILES[name]);
+      log('❌ Ошибка загрузки ' + name + ': ' + err.message);
+      throw new Error('Файл не найден');
     }
   }
-  
+  log('✅ Все WAV загружены.');
   startIntro();
 }
 
@@ -319,40 +361,27 @@ function playLayer(name, time, isIntro = false) {
 }
 
 function startIntro() {
-  log('▶️ ИНТРО: Играет только мелодия (Оригинал).');
-  
+  log('▶️ ИНТРО (Оригинал).');
   const now = ctx.currentTime;
   layers.melody.gain.gain.setValueAtTime(1.0, now);
   playLayer('melody', now, true); 
-
-  ['snare', 'hat', 'bass808'].forEach(name => {
-    layers[name].gain.gain.setValueAtTime(0, now);
-  });
+  ['snare', 'hat', 'bass808'].forEach(n => layers[n].gain.gain.setValueAtTime(0, now));
 
   setTimeout(() => {
-    log('🔥 ДРОП: Все 4 файла стартуют одновременно!');
-    startDrop();
+    log('🔥 ДРОП.');
+    if (activeSources['melody']) try { activeSources['melody'].stop(); } catch(e){}
+    
+    const startTime = ctx.currentTime + 0.05;
+    LAYER_NAMES.forEach(n => {
+      layers[n].gain.gain.setValueAtTime(1.0, startTime); 
+      playLayer(n, startTime, false); 
+    });
+    
+    setTimeout(() => {
+      isGenerating = true;
+      scheduleNextBar();
+    }, (BEAT_DURATION / currentRate) * 1000);
   }, INTRO_DURATION * 1000);
-}
-
-function startDrop() {
-  if (activeSources['melody']) {
-    try { activeSources['melody'].stop(); } catch(e) {}
-  }
-
-  const now = ctx.currentTime;
-  const startTime = now + 0.05;
-
-  LAYER_NAMES.forEach(name => {
-    layers[name].gain.gain.setValueAtTime(1.0, startTime); 
-    playLayer(name, startTime, false); 
-  });
-
-  setTimeout(() => {
-    isGenerating = true;
-    log('🎲 КОНЕЦ ДРОПА: Включается генерация.');
-    scheduleNextBar();
-  }, (BEAT_DURATION / currentRate) * 1000);
 }
 
 function scheduleNextBar() {
@@ -360,25 +389,67 @@ function scheduleNextBar() {
 
   const now = ctx.currentTime;
   const startTime = now + 0.05;
-  
   const x = (currentRate - 1.0) / 0.35; 
+  beatCounter++;
 
+  // Применяем эффекты вариации (фильтры, эхо, громкость 808)
+  applyVariation(currentVariation, x);
+
+  // --- Базовая громкость ---
   layers.melody.gain.gain.setValueAtTime(0.8 - 0.2 * x, startTime);
   playLayer('melody', startTime, false);
 
-  if (Math.random() < 0.8) {
-    layers.bass808.gain.gain.setValueAtTime(0.2 + 0.7 * x, startTime);
-    playLayer('bass808', startTime, false);
-  }
+  let play808 = false;
+  let playSnare = false;
+  let playHat = false;
+
+  // === ЛОГИКА ВАРИАЦИЙ ===
   
-  if (Math.random() < (0.2 + (x * 0.7))) {
-    layers.snare.gain.gain.setValueAtTime(0.1 + 0.8 * x, startTime);
-    playLayer('snare', startTime, false);
+  if (currentVariation === 'stems') {
+    // ВАРИАЦИЯ 5: Слои
+    play808 = true; // 808 есть всегда
+    playSnare = x > 0.3; // Снейр при легком беге
+    playHat = x > 0.6;   // Хэт при спринте
+  } 
+  else if (currentVariation === 'halftime') {
+    // ВАРИАЦИЯ 3: Half-Time (Размаз)
+    play808 = Math.random() < 0.8;
+    // Если медленно (x < 0.4), хэт играет через такт, снейр редко
+    if (x < 0.4) {
+      playSnare = beatCounter % 2 === 0; 
+      playHat = beatCounter % 2 === 0;
+    } else {
+      playSnare = true;
+      playHat = true;
+    }
+  } 
+  else {
+    // Все остальные вариации (или стандарт): случайная генерация
+    play808 = Math.random() < 0.8;
+    playSnare = Math.random() < (0.2 + (x * 0.7));
+    playHat = Math.random() < (0.1 + (x * 0.8));
   }
 
-  if (Math.random() < (0.1 + (x * 0.8))) {
+  // Применяем громкость и запускаем
+  if (play808) {
+    layers.bass808.gain.gain.setValueAtTime(0.2 + 0.7 * x, startTime);
+    playLayer('bass808', startTime, false);
+  } else {
+    layers.bass808.gain.gain.setTargetAtTime(0, startTime, 0.1);
+  }
+
+  if (playSnare) {
+    layers.snare.gain.gain.setValueAtTime(0.1 + 0.8 * x, startTime);
+    playLayer('snare', startTime, false);
+  } else {
+    layers.snare.gain.gain.setTargetAtTime(0, startTime, 0.1);
+  }
+
+  if (playHat) {
     layers.hat.gain.gain.setValueAtTime(0.1 + 0.7 * x, startTime);
     playLayer('hat', startTime, false);
+  } else {
+    layers.hat.gain.gain.setTargetAtTime(0, startTime, 0.1);
   }
 
   const nextBarDelay = (BEAT_DURATION / currentRate) * 1000;
@@ -386,15 +457,30 @@ function scheduleNextBar() {
 }
 
 // ============================================================
-// 6. ИНТЕРФЕЙС
+// 7. ИНТЕРФЕЙС И УПРАВЛЕНИЕ
 // ============================================================
 
 function log(msg) {
   const el = document.getElementById('log');
   const line = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
   el.textContent = line + el.textContent;
-  if (el.textContent.length > 4000) el.textContent = el.textContent.slice(0, 4000);
+  if (el.textContent.length > 2000) el.textContent = el.textContent.slice(0, 2000);
 }
+
+// Переключение вариаций по кнопкам
+document.querySelectorAll('.var-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    document.querySelectorAll('.var-btn').forEach(b => b.classList.remove('active'));
+    e.target.classList.add('active');
+    
+    currentVariation = e.target.getAttribute('data-var');
+    document.getElementById('modeState').textContent = e.target.textContent.replace(/[^\w\sа-яА-Я]/g, '').trim();
+    
+    // Сбрасываем ручной слайдер, чтобы управление вернулось к шагомеру
+    sliderOverrideUntil = 0; 
+    log('🎛️ Вариация: ' + currentVariation);
+  });
+});
 
 document.getElementById('startBtn').addEventListener('click', async () => {
   const btn = document.getElementById('startBtn');
@@ -410,10 +496,13 @@ document.getElementById('startBtn').addEventListener('click', async () => {
         window.addEventListener('devicemotion', handleMotion);
       }
 
+      document.getElementById('variationsPanel').style.display = 'block';
       document.getElementById('slider').disabled = false;
+      
       document.getElementById('slider').addEventListener('input', (e) => {
         if (!ctx) return;
         sliderOverrideUntil = performance.now() + 5000;
+        document.getElementById('sliderResetBtn').style.display = 'inline-block';
         const v = parseFloat(e.target.value);
         document.getElementById('sliderVal').textContent = v.toFixed(2) + 'x';
         setPlaybackSpeed(v, true);
@@ -438,6 +527,12 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       btn.textContent = '⏸ Пауза';
     }
   }
+});
+
+document.getElementById('sliderResetBtn').addEventListener('click', () => {
+  sliderOverrideUntil = 0;
+  document.getElementById('sliderResetBtn').style.display = 'none';
+  log('🔄 Управление возвращено шагомеру.');
 });
 </script>
 </body>
