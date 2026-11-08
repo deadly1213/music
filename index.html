@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка для тренировки (PoC)</title>
+<title>Адаптивная музыка (melody / snare / hat / 808)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -27,7 +27,6 @@
     font-weight: 600;
   }
   button:disabled { background: #444; cursor: not-allowed; }
-  button.secondary { background: #556; }
   .slider-row { margin: 18px 0; }
   input[type=range] { width: 100%; height: 30px; }
   .stats {
@@ -69,11 +68,10 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка для тренировки</h1>
-<p>Нажмите <b>Старт</b>. На телефоне ходите или бегите — музыка будет подстраиваться под вашу активность. На компьютере двигайте слайдер.</p>
+<h1>🏃 Адаптивная музыка (melody / snare / hat / 808)</h1>
+<p>Нажмите <b>Старт</b> — код загрузит 4 файла из папки. Идите или бегите: чем чаще шаги, тем больше ритма и низа, тем меньше мелодии.</p>
 
 <button id="startBtn">▶️ Старт</button>
-<button id="hrBtn" class="secondary" disabled>❤️ Подключить пульсометр</button>
 
 <div class="slider-row">
   <label>Интенсивность вручную: <span id="sliderVal">0.30</span></label>
@@ -81,8 +79,8 @@
 </div>
 
 <div class="stats">
-  <div class="stat"><small>Пульс</small><b id="hr">—</b></div>
-  <div class="stat"><small>Шагов/мин</small><b id="cadence">—</b></div>
+  <div class="stat"><small>Всего шагов</small><b id="totalSteps">0</b></div>
+  <div class="stat"><small>Темп (шагов/мин)</small><b id="cadence">0</b></div>
   <div class="stat"><small>Интенсивность</small><b id="intensity">0.30</b></div>
 </div>
 
@@ -90,145 +88,35 @@
 
 <div id="log">Готов к запуску. Нажмите «Старт».</div>
 
-<p class="hint">Совет: для теста на телефоне откройте страницу по HTTPS (например, через GitHub Pages) — иначе iOS не даст доступ к датчику движения.</p>
+<p class="hint">Файлы должны лежать рядом с index.html: melody.wav, snare.wav, hat.wav, 808.wav. Одинаковой длины, один BPM.</p>
 
 <script>
 // ============================================================
-// 1. МУЗЫКАЛЬНЫЙ ДВИЖОК
+// 1. КОНФИГУРАЦИЯ СЛОЁВ
 // ============================================================
 
-const BPM = 120;
-const BEAT = 60 / BPM;
-const SIXTEENTH = BEAT / 4;
-const SCHEDULE_AHEAD = 0.1;
-const SCHEDULER_MS = 25;
+const LAYER_NAMES = ['melody', 'snare', 'hat', 'bass808'];
 
-const CHORDS = [
-  { notes: [45, 48, 52, 57], bass: 33 },
-  { notes: [41, 45, 48, 53], bass: 29 },
-  { notes: [48, 52, 55, 60], bass: 36 },
-  { notes: [43, 47, 50, 55], bass: 31 }
-];
+const LAYER_FILES = {
+  melody:  './melody.wav',
+  snare:   './snare.wav',
+  hat:     './hat.wav',
+  bass808: './808.wav'
+};
+
+// ============================================================
+// 2. АУДИО-ДВИЖОК
+// ============================================================
 
 let ctx = null;
 let masterGain = null;
 let limiter = null;
 let layers = null;
-let noiseBuffer = null;
-let schedulerTimer = null;
-let nextNoteTime = 0;
-let step16 = 0;
 let currentIntensity = 0.3;
 let sliderOverrideUntil = 0;
 
-function midiToFreq(m) {
-  return 440 * Math.pow(2, (m - 69) / 12);
-}
-
-function getNoiseBuffer() {
-  if (noiseBuffer) return noiseBuffer;
-  const len = Math.floor(ctx.sampleRate * 0.1);
-  noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
-  const data = noiseBuffer.getChannelData(0);
-  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-  return noiseBuffer;
-}
-
-function playKick(time) {
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.frequency.setValueAtTime(150, time);
-  osc.frequency.exponentialRampToValueAtTime(45, time + 0.1);
-  gain.gain.setValueAtTime(0.9, time);
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
-  osc.connect(gain).connect(layers.drums.gain);
-  osc.start(time);
-  osc.stop(time + 0.2);
-}
-
-function playHat(time) {
-  const src = ctx.createBufferSource();
-  src.buffer = getNoiseBuffer();
-  const hp = ctx.createBiquadFilter();
-  hp.type = 'highpass';
-  hp.frequency.value = 7000;
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.22, time);
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
-  src.connect(hp).connect(gain).connect(layers.drums.gain);
-  src.start(time);
-  src.stop(time + 0.06);
-}
-
-function playBass(time, midi) {
-  const osc = ctx.createOscillator();
-  osc.type = 'sawtooth';
-  osc.frequency.value = midiToFreq(midi);
-  const lp = ctx.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.setValueAtTime(900, time);
-  lp.frequency.exponentialRampToValueAtTime(200, time + 0.2);
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.5, time);
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
-  osc.connect(lp).connect(gain).connect(layers.bass.gain);
-  osc.start(time);
-  osc.stop(time + 0.3);
-}
-
-function playPad(time, notes, duration) {
-  notes.forEach((midi) => {
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.value = midiToFreq(midi);
-    osc.detune.value = (Math.random() - 0.5) * 12;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 1300;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, time);
-    gain.gain.linearRampToValueAtTime(0.08, time + 0.4);
-    gain.gain.linearRampToValueAtTime(0.0001, time + duration);
-    osc.connect(lp).connect(gain).connect(layers.pad.gain);
-    osc.start(time);
-    osc.stop(time + duration + 0.05);
-  });
-}
-
-function playArp(time, midi) {
-  const osc = ctx.createOscillator();
-  osc.type = 'triangle';
-  osc.frequency.value = midiToFreq(midi);
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.3, time);
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
-  osc.connect(gain).connect(layers.arp.gain);
-  osc.start(time);
-  osc.stop(time + 0.15);
-}
-
-function scheduleNote(step, time) {
-  const bar = Math.floor(step / 16) % 4;
-  const s = step % 16;
-  const chord = CHORDS[bar];
-
-  if (s === 0 || s === 4 || s === 8 || s === 12) playKick(time);
-  if (s === 2 || s === 6 || s === 10 || s === 14) playHat(time);
-  if (s === 0 || s === 4 || s === 8 || s === 12) playBass(time, chord.bass);
-  if (s === 0) playPad(time, chord.notes, BEAT * 4 * 0.95);
-  if (s % 2 === 0) {
-    const idx = (s / 2) % chord.notes.length;
-    playArp(time, chord.notes[idx] + 12);
-  }
-}
-
-function scheduler() {
-  while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD) {
-    scheduleNote(step16, nextNoteTime);
-    nextNoteTime += SIXTEENTH;
-    step16++;
-  }
-}
+let wavBuffers = {};
+let wavSources = {};
 
 function initAudio() {
   ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -245,22 +133,44 @@ function initAudio() {
   masterGain.connect(limiter).connect(ctx.destination);
 
   layers = {};
-  for (const name of ['drums', 'bass', 'pad', 'arp']) {
-    const g = ctx.createGain();
-    g.gain.value = 0;
-    g.connect(masterGain);
-    layers[name] = { gain: g };
-  }
 
-  step16 = 0;
-  nextNoteTime = ctx.currentTime + 0.1;
-  schedulerTimer = setInterval(scheduler, SCHEDULER_MS);
+  for (const name of LAYER_NAMES) {
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+
+    const filter = ctx.createBiquadFilter();
+
+    if (name === 'melody') {
+      // Мелодия: при низкой интенсивности — яркая, при высокой — приглушённая
+      filter.type = 'lowpass';
+      filter.frequency.value = 4000;
+      filter.Q.value = 0.5;
+    } else if (name === 'snare') {
+      // Снейр: при низкой — срезан, при высокой — полный, резкий
+      filter.type = 'highpass';
+      filter.frequency.value = 400;
+      filter.Q.value = 0.7;
+    } else if (name === 'hat') {
+      // Хай-хэт: при низкой — глухой, при высокой — яркий
+      filter.type = 'highpass';
+      filter.frequency.value = 3000;
+      filter.Q.value = 0.7;
+    } else if (name === 'bass808') {
+      // 808: при низкой — почти не слышен (lowpass закрыт), при высокой — открыт
+      filter.type = 'lowpass';
+      filter.frequency.value = 80;
+      filter.Q.value = 0.8;
+    }
+
+    gain.connect(filter).connect(masterGain);
+    layers[name] = { gain, filter };
+  }
 
   applyIntensity(currentIntensity, 0.01, false);
 }
 
 // ============================================================
-// 2. УПРАВЛЕНИЕ ИНТЕНСИВНОСТЬЮ
+// 3. УПРАВЛЕНИЕ ИНТЕНСИВНОСТЬЮ
 // ============================================================
 
 function applyIntensity(x, tau = 0.15, fromSlider = false) {
@@ -269,11 +179,33 @@ function applyIntensity(x, tau = 0.15, fromSlider = false) {
   currentIntensity = x;
   const now = ctx.currentTime;
 
-  layers.drums.gain.gain.setTargetAtTime(0.35 + 0.65 * x, now, tau);
-  layers.bass.gain.gain.setTargetAtTime(0.9 * x, now, tau);
-  layers.pad.gain.gain.setTargetAtTime(0.7 - 0.55 * x, now, tau);
-  layers.arp.gain.gain.setTargetAtTime(Math.max(0, (x - 0.4) / 0.6) * 0.8, now, tau);
+  // --- Громкость ---
+  // Мелодия: громкая в покое, тише при высокой интенсивности
+  layers.melody.gain.gain.setTargetAtTime(0.75 - 0.45 * x, now, tau);
 
+  // Снейр: почти нет в покое, громкий при высокой
+  layers.snare.gain.gain.setTargetAtTime(0.1 + 0.85 * x, now, tau);
+
+  // Хай-хэт: тихий в покое, громкий и яркий при высокой
+  layers.hat.gain.gain.setTargetAtTime(0.15 + 0.8 * x, now, tau);
+
+  // 808: почти нет в покое, мощный при высокой
+  layers.bass808.gain.gain.setTargetAtTime(0.05 + 0.9 * x, now, tau);
+
+  // --- Фильтры ---
+  // Мелодия: 4000 Гц → 800 Гц (приглушается)
+  layers.melody.filter.frequency.setTargetAtTime(4000 - 3200 * x, now, tau);
+
+  // Снейр: 1200 Гц → 200 Гц (открывается, становится полнее)
+  layers.snare.filter.frequency.setTargetAtTime(1200 - 1000 * x, now, tau);
+
+  // Хай-хэт: 6000 Гц → 2000 Гц (ярче)
+  layers.hat.filter.frequency.setTargetAtTime(6000 - 4000 * x, now, tau);
+
+  // 808: 80 Гц → 400 Гц (открывается, становится плотнее и слышнее)
+  layers.bass808.filter.frequency.setTargetAtTime(80 + 320 * x, now, tau);
+
+  // --- UI ---
   document.getElementById('intensity').textContent = x.toFixed(2);
   document.getElementById('intensityBar').style.width = (x * 100) + '%';
 
@@ -284,12 +216,13 @@ function applyIntensity(x, tau = 0.15, fromSlider = false) {
 }
 
 // ============================================================
-// 3. ДАТЧИК ДВИЖЕНИЯ (шаги)
+// 4. ШАГОМЕР
 // ============================================================
 
 let motionActive = false;
 let motionEventCount = 0;
 let stepTimestamps = [];
+let totalSteps = 0;
 let lastStepTime = 0;
 let aboveThreshold = false;
 
@@ -303,7 +236,7 @@ function handleMotion(event) {
 
   if (!motionActive) {
     motionActive = true;
-    log('✅ Датчик движения активен');
+    log('✅ Шагомер активен');
   }
 
   const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
@@ -314,8 +247,10 @@ function handleMotion(event) {
     const now = performance.now();
     if (now - lastStepTime > 250) {
       lastStepTime = now;
+      totalSteps++;
       stepTimestamps.push(now);
       if (stepTimestamps.length > 50) stepTimestamps.shift();
+      document.getElementById('totalSteps').textContent = totalSteps;
     }
     aboveThreshold = true;
   } else if (mag < LOW) {
@@ -325,7 +260,6 @@ function handleMotion(event) {
 
 setInterval(() => {
   if (!motionActive) return;
-  if (hrConnected) return;
   if (performance.now() < sliderOverrideUntil) return;
 
   const now = performance.now();
@@ -339,41 +273,73 @@ setInterval(() => {
 }, 1000);
 
 // ============================================================
-// 4. ПУЛЬСОМЕТР
+// 5. ЗАГРУЗКА 4 WAV
 // ============================================================
 
-let hrConnected = false;
-let currentHR = 0;
+async function loadAllWavs() {
+  log('⏳ Загрузка 4 WAV-файлов…');
 
-async function connectHR() {
+  for (const name of LAYER_NAMES) {
+    try {
+      const url = LAYER_FILES[name];
+      log('⏳ ' + name + ': ' + url);
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('HTTP ' + response.status + ' — файл не найден?');
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = await ctx.decodeAudioData(arrayBuffer);
+      wavBuffers[name] = buffer;
+      log('✅ ' + name + ': ' + buffer.duration.toFixed(2) + ' с');
+    } catch (err) {
+      log('❌ ' + name + ': ' + err.message);
+      throw new Error('Не удалось загрузить ' + name + '. Проверьте ' + LAYER_FILES[name]);
+    }
+  }
+
+  const durations = LAYER_NAMES.map(n => wavBuffers[n].duration);
+  const min = Math.min(...durations);
+  const max = Math.max(...durations);
+  if (max - min > 0.05) {
+    log('⚠️ Длины файлов различаются на ' + (max - min).toFixed(2) + ' с — будет рассинхрон');
+  }
+
+  startWavPlayback();
+}
+
+function stopWavPlayback() {
+  for (const name of LAYER_NAMES) {
+    if (wavSources[name]) {
+      try { wavSources[name].stop(); } catch (e) {}
+      try { wavSources[name].disconnect(); } catch (e) {}
+      wavSources[name] = null;
+    }
+  }
+}
+
+function startWavPlayback() {
   try {
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: ['heart_rate'] }]
-    });
-    const server = await device.gatt.connect();
-    const service = await server.getPrimaryService('heart_rate');
-    const ch = await service.getCharacteristic('heart_rate_measurement');
-    await ch.startNotifications();
+    stopWavPlayback();
+    const startAt = ctx.currentTime + 0.1;
 
-    ch.addEventListener('characteristicvaluechanged', (ev) => {
-      const v = ev.target.value;
-      const flags = v.getUint8(0);
-      const hr = (flags & 0x01) ? v.getUint16(1, true) : v.getUint8(1);
-      currentHR = hr;
-      document.getElementById('hr').textContent = hr;
-      const x = Math.max(0, Math.min(1, (hr - 70) / 100));
-      applyIntensity(x, 0.15, false);
-    });
+    for (const name of LAYER_NAMES) {
+      const src = ctx.createBufferSource();
+      src.buffer = wavBuffers[name];
+      src.loop = true;
+      src.connect(layers[name].gain);
+      src.start(startAt);
+      wavSources[name] = src;
+    }
 
-    hrConnected = true;
-    log('✅ Пульсометр подключён (' + (device.name || 'BLE') + ')');
+    applyIntensity(currentIntensity, 0.01, false);
+    log('🎵 Все 4 слоя играют синхронно. Интенсивность меняет ритм, низ и мелодию.');
   } catch (err) {
-    log('❌ Ошибка подключения пульсометра: ' + err.message);
+    log('❌ Ошибка запуска WAV: ' + err.message);
   }
 }
 
 // ============================================================
-// 5. ИНТЕРФЕЙС
+// 6. ИНТЕРФЕЙС
 // ============================================================
 
 function log(msg) {
@@ -392,30 +358,23 @@ document.getElementById('startBtn').addEventListener('click', async () => {
 
       if (typeof DeviceMotionEvent !== 'undefined'
           && typeof DeviceMotionEvent.requestPermission === 'function') {
+        log('⏳ Запрашиваем доступ к датчику движения…');
         try {
           const perm = await DeviceMotionEvent.requestPermission();
           if (perm === 'granted') {
             window.addEventListener('devicemotion', handleMotion);
-            log('✅ Разрешение на датчик движения получено');
+            log('✅ Доступ к шагомеру разрешён');
           } else {
-            log('⚠️ Датчик движения не разрешён — используйте слайдер');
+            log('⚠️ Доступ к шагомеру отклонён — используйте слайдер');
           }
         } catch (e) {
-          log('⚠️ Ошибка доступа к датчику: ' + e.message);
+          log('⚠️ Ошибка запроса доступа: ' + e.message);
         }
       } else if (window.DeviceMotionEvent) {
         window.addEventListener('devicemotion', handleMotion);
-        log('ℹ️ Датчик движения доступен (активируется при реальном движении)');
+        log('✅ Шагомер подключён (Android/десктоп)');
       } else {
         log('ℹ️ Датчик движения не поддерживается — используйте слайдер');
-      }
-
-      const hrBtn = document.getElementById('hrBtn');
-      if (navigator.bluetooth) {
-        hrBtn.disabled = false;
-        log('ℹ️ Web Bluetooth доступен — можно подключить пульсометр');
-      } else {
-        log('ℹ️ Web Bluetooth недоступен (Safari/iOS) — пульсометр пропускаем');
       }
 
       document.getElementById('slider').disabled = false;
@@ -427,10 +386,17 @@ document.getElementById('startBtn').addEventListener('click', async () => {
         applyIntensity(v, 0.05, true);
       });
 
+      btn.textContent = '⏳ Загрузка…';
+      btn.disabled = true;
+
+      await loadAllWavs();
+
       btn.textContent = '⏸ Пауза';
-      log('🎵 Музыка запущена');
+      btn.disabled = false;
     } catch (e) {
       log('❌ Ошибка запуска: ' + e.message);
+      btn.textContent = '▶️ Старт';
+      btn.disabled = false;
     }
   } else {
     if (ctx.state === 'running') {
@@ -444,8 +410,6 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     }
   }
 });
-
-document.getElementById('hrBtn').addEventListener('click', connectHR);
 </script>
 </body>
 </html>
