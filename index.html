@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Интро соло + Дроп + Генерация)</title>
+<title>Адаптивная музыка (Slowed / Speed)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -67,20 +67,20 @@
 </head>
 <body>
 
-<h1>🏃 Генеративная музыка (Соло -> Дроп -> Рандом)</h1>
-<p>Нажмите <b>Старт</b>. Сначала 3 такта только мелодии, затем включаются все инструменты, после чего начинается генерация.</p>
+<h1>🏃 Генеративная музыка (Slowed -> Speed)</h1>
+<p>Идите медленно — музыка замедлится. Бегите — ускорится. Переход плавный.</p>
 
 <button id="startBtn">▶️ Старт</button>
 
 <div class="slider-row">
-  <label>Интенсивность вручную: <span id="sliderVal">3</span></label>
-  <input type="range" id="slider" min="1" max="15" step="1" value="3" disabled>
+  <label>Темп вручную: <span id="sliderVal">1.0x</span></label>
+  <input type="range" id="slider" min="0.85" max="1.25" step="0.01" value="1.0" disabled>
 </div>
 
 <div class="stats">
-  <div class="stat"><small>Всего шагов</small><b id="totalSteps">0</b></div>
-  <div class="stat"><small>Темп (шагов/мин)</small><b id="cadence">0</b></div>
-  <div class="stat"><small>Уровень (1-15)</small><b id="intensity">3</b></div>
+  <div class="stat"><small>Шагов/мин</small><b id="cadence">0</b></div>
+  <div class="stat"><small>Скорость</small><b id="playbackRate">1.0x</b></div>
+  <div class="stat"><small>Состояние</small><b id="modeState">Normal</b></div>
 </div>
 
 <div class="bar-wrap"><div class="bar" id="intensityBar"></div></div>
@@ -100,9 +100,9 @@ const LAYER_FILES = {
   bass808: './808.wav'
 };
 
-const BEAT_DURATION = 3.42; // Длительность одного такта
-const INTRO_BEATS = 3;      // Количество тактов в интро
-const INTRO_DURATION = BEAT_DURATION * INTRO_BEATS; // 10.26 секунд
+const BEAT_DURATION = 3.42; // Длительность оригинального такта
+const INTRO_BEATS = 3;
+const INTRO_DURATION = BEAT_DURATION * INTRO_BEATS; 
 
 // ============================================================
 // 2. АУДИО-ДВИЖОК
@@ -168,45 +168,58 @@ function initAudio() {
     }
     layers[name] = { gain, filter };
   }
-  updateFilters(currentLevel);
+  updateFilters(currentLevel, 1.0);
 }
 
 // ============================================================
-// 3. УПРАВЛЕНИЕ УРОВНЯМИ
+// 3. УПРАВЛЕНИЕ ТЕМПОМ И ФИЛЬТРАМИ (Slowed / Speed)
 // ============================================================
 
-function setIntensityLevel(level, fromSlider = false) {
+function setPlaybackSpeed(rate, fromSlider = false) {
   if (!ctx) return;
-  level = Math.max(1, Math.min(15, level));
-  if (level === currentLevel && !fromSlider) return;
+  rate = Math.max(0.85, Math.min(1.25, rate));
   
-  currentLevel = level;
   const now = ctx.currentTime;
-  const rampTime = 0.8; 
+  const rampTime = 2.0; // 2 секунды на плавный переход
 
-  updateFilters(level, now, rampTime);
+  // Меняем скорость у всех активных источников
+  for (const name in activeSources) {
+    if (activeSources[name]) {
+      activeSources[name].playbackRate.linearRampToValueAtTime(rate, now + rampTime);
+    }
+  }
 
-  document.getElementById('intensity').textContent = level;
-  document.getElementById('intensityBar').style.width = ((level / 15) * 100) + '%';
+  // Меняем фильтры (чем медленнее, тем глуше)
+  const x = (rate - 0.85) / 0.4; // Нормализация: 0.85 -> 0, 1.25 -> 1
+  layers.melody.filter.frequency.linearRampToValueAtTime(2000 + 2000 * x, now + rampTime);
+  layers.bass808.filter.frequency.linearRampToValueAtTime(50 + 350 * x, now + rampTime);
+  
+  // Эхо для Slowed
+  melodyWetGain.gain.linearRampToValueAtTime(0.6 - 0.4 * x, now + rampTime);
+
+  // UI
+  document.getElementById('playbackRate').textContent = rate.toFixed(2) + 'x';
+  const barWidth = ((rate - 0.85) / 0.4) * 100;
+  document.getElementById('intensityBar').style.width = barWidth + '%';
+
+  let mode = 'Normal';
+  if (rate < 0.98) mode = 'Slowed';
+  if (rate > 1.02) mode = 'Sped Up';
+  document.getElementById('modeState').textContent = mode;
 
   if (!fromSlider) {
-    document.getElementById('slider').value = level;
-    document.getElementById('sliderVal').textContent = level;
+    document.getElementById('slider').value = rate;
+    document.getElementById('sliderVal').textContent = rate.toFixed(2) + 'x';
   }
 }
 
-function updateFilters(level, now = ctx.currentTime, rampTime = 0.8) {
-  const x = (level - 1) / 14; 
-  layers.melody.filter.frequency.linearRampToValueAtTime(4000 - 2800 * x, now + rampTime);
-  layers.snare.filter.frequency.linearRampToValueAtTime(1200 - 1000 * x, now + rampTime);
-  layers.hat.filter.frequency.linearRampToValueAtTime(6000 - 4000 * x, now + rampTime);
-  layers.bass808.filter.frequency.linearRampToValueAtTime(80 + 320 * x, now + rampTime);
-  melodyWetGain.gain.linearRampToValueAtTime(x * 0.6, now + rampTime);
-  melodyDryGain.gain.linearRampToValueAtTime(1.0 - 0.3 * x, now + rampTime);
+function updateFilters(level, rate) {
+  // Заглушка для начальной инициализации
+  setPlaybackSpeed(rate, true);
 }
 
 // ============================================================
-// 4. ШАГОМЕР
+// 4. ШАГОМЕР (Определение Slowed / Normal / Speed)
 // ============================================================
 
 let motionActive = false;
@@ -235,7 +248,6 @@ function handleMotion(event) {
       totalSteps++;
       stepTimestamps.push(now);
       if (stepTimestamps.length > 50) stepTimestamps.shift();
-      document.getElementById('totalSteps').textContent = totalSteps;
     }
     aboveThreshold = true;
   } else if (mag < THRESHOLD_LOW) {
@@ -252,11 +264,25 @@ setInterval(() => {
   const cadence = stepTimestamps.length * 12;
   document.getElementById('cadence').textContent = cadence.toFixed(0);
 
-  let level = Math.round(cadence / 20);
-  if (level < 1) level = 1;
-  if (level > 15) level = 15;
+  // ЛОГИКА SLOWED / SPEED
+  let targetRate = 1.0;
   
-  setIntensityLevel(level);
+  if (cadence <= 26) {
+    // 1-26 шагов: SLOWED (0.85x)
+    targetRate = 0.85;
+  } else if (cadence <= 60) {
+    // 27-60 шагов: NORMAL (1.0x)
+    targetRate = 1.0;
+  } else {
+    // 60-200 шагов: SPEED (до 1.25x)
+    // Чем быстрее бежим, тем выше скорость (от 60 до 200 шагов мапим в 1.0 - 1.25)
+    const speedFactor = (cadence - 60) / 140; 
+    targetRate = 1.0 + (speedFactor * 0.25); 
+  }
+  
+  targetRate = Math.max(0.85, Math.min(1.25, targetRate));
+  setPlaybackSpeed(targetRate);
+  
 }, 1000);
 
 // ============================================================
@@ -293,51 +319,47 @@ function playLayer(name, time, isIntro = false) {
   
   const src = ctx.createBufferSource();
   src.buffer = wavBuffers[name];
-  src.loop = isIntro; // В интро мелодия зацикливается
+  src.loop = isIntro; 
+  
+  // ВАЖНО: сохраняем ссылку на источник, чтобы менять его скорость
+  src.playbackRate.value = 1.0; 
+
   src.connect(layers[name].gain);
   src.start(time);
   activeSources[name] = src;
 }
 
-// --- 1. ИНТРО ---
 function startIntro() {
-  log('▶️ ИНТРО: Играет только мелодия (3 такта по ' + BEAT_DURATION + 'с).');
+  log('▶️ ИНТРО: Играет только мелодия.');
   
   const now = ctx.currentTime;
-  
-  // Включаем только мелодию на полную громкость, зацикливаем её
   layers.melody.gain.gain.setValueAtTime(1.0, now);
-  playLayer('melody', now, true); // true = зациклить
+  playLayer('melody', now, true); 
 
-  // Скрываем остальные слои
   ['snare', 'hat', 'bass808'].forEach(name => {
     layers[name].gain.gain.setValueAtTime(0, now);
   });
 
-  // Через 10.26 секунд запускаем дроп
   setTimeout(() => {
     log('🔥 ДРОП: Все 4 файла стартуют одновременно!');
     startDrop();
   }, INTRO_DURATION * 1000);
 }
 
-// --- 2. ДРОП (все одновременно) ---
 function startDrop() {
-  // Останавливаем зацикленную мелодию
   if (activeSources['melody']) {
     try { activeSources['melody'].stop(); } catch(e) {}
   }
 
   const now = ctx.currentTime;
-  const startTime = now + 0.05; // Небольшая задержка для точности
+  const startTime = now + 0.05;
 
-  // Запускаем все 4 файла с самого начала
   LAYER_NAMES.forEach(name => {
-    layers[name].gain.gain.setValueAtTime(1.0, startTime); // Громкость на полную
-    playLayer(name, startTime, false); // false = без зацикливания (один такт)
+    layers[name].gain.gain.setValueAtTime(1.0, startTime); 
+    playLayer(name, startTime, false); 
   });
 
-  // Как только дроп отыграл один такт (3.42 сек), включаем генератор
+  // Дроп отыграл один такт, включаем генератор
   setTimeout(() => {
     isGenerating = true;
     log('🎲 КОНЕЦ ДРОПА: Включается генерация.');
@@ -345,20 +367,18 @@ function startDrop() {
   }, BEAT_DURATION * 1000);
 }
 
-// --- 3. ГЕНЕРАЦИЯ ---
 function scheduleNextBar() {
   if (!ctx || ctx.state !== 'running' || !isGenerating) return;
 
   const now = ctx.currentTime;
   const startTime = now + 0.05;
   
-  const x = (currentLevel - 1) / 14;
+  const rate = parseFloat(document.getElementById('playbackRate').textContent);
+  const x = (rate - 0.85) / 0.4; // Используем скорость как фактор интенсивности
 
-  // Мелодия звучит всегда
   layers.melody.gain.gain.setValueAtTime(0.8 - 0.2 * x, startTime);
   playLayer('melody', startTime, false);
 
-  // Генерируем остальные слои
   if (Math.random() < 0.8) {
     layers.bass808.gain.gain.setValueAtTime(0.2 + 0.7 * x, startTime);
     playLayer('bass808', startTime, false);
@@ -374,8 +394,9 @@ function scheduleNextBar() {
     playLayer('hat', startTime, false);
   }
 
-  // Планируем следующий такт
-  sequencerTimer = setTimeout(scheduleNextBar, BEAT_DURATION * 1000);
+  // Планируем следующий такт (с учетом текущей скорости)
+  const nextBarDelay = (BEAT_DURATION / rate) * 1000;
+  sequencerTimer = setTimeout(scheduleNextBar, nextBarDelay);
 }
 
 // ============================================================
@@ -407,9 +428,9 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       document.getElementById('slider').addEventListener('input', (e) => {
         if (!ctx) return;
         sliderOverrideUntil = performance.now() + 5000;
-        const v = parseInt(e.target.value);
-        document.getElementById('sliderVal').textContent = v;
-        setIntensityLevel(v, true);
+        const v = parseFloat(e.target.value);
+        document.getElementById('sliderVal').textContent = v.toFixed(2) + 'x';
+        setPlaybackSpeed(v, true);
       });
 
       btn.textContent = '⏳ Загрузка…';
