@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Идеальный дроп)</title>
+<title>Адаптивная музыка (Идеальный синхрон)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -88,16 +88,16 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка (Бесшовный дроп)</h1>
-<p>Мелодия сыграет ровно один раз, затем мгновенно врубится бит. Работают только фильтры и эхо.</p>
+<h1>🏃 Адаптивная музыка (Синхрон)</h1>
+<p>Мелодия сыграет один раз, затем мгновенно врубится бит. Эффекты меняют только фильтры.</p>
 
 <div class="variations" id="variationsPanel">
   <button class="var-btn active" data-var="standard">Стандарт</button>
-  <button class="var-btn" data-var="filter">🌑 Фильтр</button>
-  <button class="var-btn" data-var="echo">🌪️ Эхо</button>
-  <button class="var-btn" data-var="halftime">🥁 Half-Time</button>
-  <button class="var-btn" data-var="bass808">🔊 808</button>
-  <button class="var-btn" data-var="stems">🎚️ Слои (Фильтр)</button>
+  <button class="var-btn" data-var="filter">🌑 Фильтр (Глухо)</button>
+  <button class="var-btn" data-var="echo">🌪️ Эхо (Космос)</button>
+  <button class="var-btn" data-var="halftime">🥁 Half-Time (Тяжелый)</button>
+  <button class="var-btn" data-var="bass808">🔊 808 (Давление)</button>
+  <button class="var-btn" data-var="stems">📻 Радио (Тонкий)</button>
 </div>
 
 <button id="micBtn">🎤 Включить микрофон</button>
@@ -140,8 +140,8 @@ let sliderOverrideUntil = 0;
 let wavBuffers = {};
 let activeSources = {}; 
 let melodyDelay = null, melodyDelayFeedback = null, melodyDryGain = null, melodyWetGain = null;
-let dropTimer = null;
 let audioStarted = false; 
+let isDropped = false;
 
 let micActive = false;
 let analyser = null;
@@ -168,10 +168,11 @@ function initAudio() {
     gain.gain.value = 0;
 
     const filter = ctx.createBiquadFilter();
-    if (name === 'melody') { filter.type = 'lowpass'; filter.frequency.value = 4000; }
-    else if (name === 'snare') { filter.type = 'highpass'; filter.frequency.value = 400; }
+    // Базовые настройки фильтров (прозрачный звук)
+    if (name === 'melody') { filter.type = 'lowpass'; filter.frequency.value = 20000; }
+    else if (name === 'snare') { filter.type = 'highpass'; filter.frequency.value = 100; }
     else if (name === 'hat') { filter.type = 'highpass'; filter.frequency.value = 3000; }
-    else if (name === 'bass808') { filter.type = 'lowpass'; filter.frequency.value = 80; }
+    else if (name === 'bass808') { filter.type = 'lowpass'; filter.frequency.value = 200; }
 
     if (name === 'melody') {
       melodyDelay = ctx.createDelay(1.0);
@@ -193,9 +194,12 @@ function initAudio() {
     }
     layers[name] = { gain, filter };
   }
-  applyVariationFX(currentVariation, 0);
+  applyVariationFX(currentVariation);
 }
 
+// ==========================================
+// МИКРОФОН
+// ==========================================
 async function initMicrophone() {
   try {
     if (!ctx) initAudio();
@@ -246,10 +250,12 @@ function setPlaybackSpeed(rate, fromSlider = false) {
   if (Math.abs(rate - currentRate) < 0.005 && !fromSlider) return;
 
   const now = ctx.currentTime;
+  // Меняем скорость ВСЕМ источникам одновременно (они не разойдутся)
   for (const name in activeSources) {
     if (activeSources[name]) activeSources[name].playbackRate.linearRampToValueAtTime(rate, now + 0.2);
   }
   currentRate = rate;
+  
   document.getElementById('playbackRate').textContent = rate.toFixed(2) + 'x';
   document.getElementById('intensityBar').style.width = ((rate - 1.0) / 0.35) * 100 + '%';
   
@@ -259,6 +265,9 @@ function setPlaybackSpeed(rate, fromSlider = false) {
   }
 }
 
+// ==========================================
+// ДАТЧИК ДВИЖЕНИЯ
+// ==========================================
 let motionActive = false, motionEventCount = 0, stepTimestamps = [];
 let lastStepTime = 0, aboveThreshold = false;
 let dynamicHigh = 11.0, dynamicLow = 9.8, gravityMag = 9.8;   
@@ -305,43 +314,48 @@ setInterval(() => {
   setPlaybackSpeed(Math.max(1.0, Math.min(1.35, targetRate)));
 }, 500); 
 
-function applyVariationFX(name, x) {
+// ==========================================
+// ЭФФЕКТЫ (ТОЛЬКО ФИЛЬТРЫ, БЕЗ СБОЯ РИТМА)
+// ==========================================
+function applyVariationFX(name) {
   if (!ctx) return;
   const now = ctx.currentTime;
   const rT = 0.1; 
 
-  // Базовые значения
-  layers.melody.filter.frequency.setTargetAtTime(4000, now, rT);
-  layers.snare.filter.frequency.setTargetAtTime(400, now, rT);
+  // 1. Сброс фильтров в исходное (прозрачное) состояние
+  layers.melody.filter.frequency.setTargetAtTime(20000, now, rT);
+  layers.snare.filter.frequency.setTargetAtTime(100, now, rT);
   layers.hat.filter.frequency.setTargetAtTime(3000, now, rT);
-  layers.bass808.filter.frequency.setTargetAtTime(80 + 250 * x, now, rT);
+  layers.bass808.filter.frequency.setTargetAtTime(200, now, rT);
   melodyWetGain.gain.setTargetAtTime(0, now, rT);
   melodyDryGain.gain.setTargetAtTime(1.0, now, rT);
 
-  // --- ТОЛЬКО ЭФФЕКТЫ И ФИЛЬТРЫ ---
+  // 2. Применяем эффект
   if (name === 'filter') {
-    layers.melody.filter.frequency.setTargetAtTime(300, now, rT);
+    layers.melody.filter.frequency.setTargetAtTime(400, now, rT);
   }
-  if (name === 'echo') {
+  else if (name === 'echo') {
     melodyWetGain.gain.setTargetAtTime(0.9, now, rT);
     melodyDryGain.gain.setTargetAtTime(0.3, now, rT);
   }
-  if (name === 'bass808') {
-    layers.bass808.filter.frequency.setTargetAtTime(500, now, rT);
-    layers.melody.filter.frequency.setTargetAtTime(1000, now, rT); // Мелодию чуть глушим, чтобы бас вышел вперед
+  else if (name === 'halftime') {
+    layers.melody.filter.frequency.setTargetAtTime(800, now, rT);
+    layers.hat.filter.frequency.setTargetAtTime(1000, now, rT);
+    layers.snare.filter.frequency.setTargetAtTime(300, now, rT);
   }
-  if (name === 'halftime') {
-    // Имитация Half-Time через фильтр (глухой звук)
-    layers.melody.filter.frequency.setTargetAtTime(600, now, rT);
-    layers.hat.filter.frequency.setTargetAtTime(1500, now, rT);
+  else if (name === 'bass808') {
+    layers.bass808.filter.frequency.setTargetAtTime(600, now, rT);
+    layers.melody.filter.frequency.setTargetAtTime(1000, now, rT);
   }
-  if (name === 'stems') {
-    // Имитация тонкого звука (телефонный эффект)
-    layers.melody.filter.frequency.setTargetAtTime(2000, now, rT); 
-    layers.bass808.filter.frequency.setTargetAtTime(150, now, rT);
+  else if (name === 'stems') {
+    layers.melody.filter.frequency.setTargetAtTime(1500, now, rT);
+    layers.bass808.filter.frequency.setTargetAtTime(100, now, rT);
   }
 }
 
+// ==========================================
+// ЛОГИКА ЗАПУСКА (ИДЕАЛЬНЫЙ ДРОП)
+// ==========================================
 async function loadAllWavs() {
   for (const name of LAYER_NAMES) {
     try {
@@ -352,50 +366,62 @@ async function loadAllWavs() {
     } catch (err) { throw new Error('Файл не найден: ' + LAYER_FILES[name]); }
   }
   log('✅ Аудио загружено. Запуск...');
-  startIntro();
+  startEngine();
 }
 
-function startIntro() {
+function startEngine() {
   const now = ctx.currentTime + 0.1; 
-  const introDuration = wavBuffers['melody'].duration; // Длительность ровно одного проигрывания
-  const dropTime = now + introDuration; // Время старта дропа
+  
+  // 1. Настраиваем громкость (мелодия громко, остальные 0)
+  layers.melody.gain.gain.setValueAtTime(1.0, now);
+  layers.snare.gain.gain.setValueAtTime(0, now);
+  layers.hat.gain.gain.setValueAtTime(0, now);
+  layers.bass808.gain.gain.setValueAtTime(0, now);
 
-  // 1. Запускаем ВСЕ 4 файла СРАЗУ, чтобы они были синхронизированы
-  LAYER_NAMES.forEach(n => {
+  // 2. Запускаем 3 барабана (Snare, Hat, 808) в бесконечный цикл ТИХО
+  ['snare', 'hat', 'bass808'].forEach(n => {
     const src = ctx.createBufferSource();
     src.buffer = wavBuffers[n];
-    src.loop = true; // Бесконечный цикл
-    src.playbackRate.value = currentRate; 
+    src.loop = true;
+    src.playbackRate.value = currentRate;
     src.connect(layers[n].gain);
     src.start(now);
     activeSources[n] = src;
   });
 
-  // 2. Мелодия играет громко
-  layers.melody.gain.gain.setValueAtTime(1.0, now);
-  
-  // 3. Остальные инструменты выключены в начале
-  layers.snare.gain.gain.setValueAtTime(0, now);
-  layers.hat.gain.gain.setValueAtTime(0, now);
-  layers.bass808.gain.gain.setValueAtTime(0, now);
+  // 3. Запускаем Мелодию (без цикла, чтобы поймать конец)
+  const introMelody = ctx.createBufferSource();
+  introMelody.buffer = wavBuffers['melody'];
+  introMelody.loop = false; 
+  introMelody.playbackRate.value = currentRate;
+  introMelody.connect(layers.melody.gain);
+  introMelody.start(now);
+  activeSources['melody'] = introMelody;
 
-  log(`▶️ Интро: ${introDuration.toFixed(2)} сек.`);
+  log('▶️ Интро: Мелодия играет один раз...');
 
-  // 4. В момент окончания интро (с точностью до микросекунды) включаем остальные слои
-  layers.snare.gain.gain.setValueAtTime(0, dropTime);
-  layers.snare.gain.gain.linearRampToValueAtTime(0.8, dropTime + 0.05);
-  
-  layers.hat.gain.gain.setValueAtTime(0, dropTime);
-  layers.hat.gain.gain.linearRampToValueAtTime(0.7, dropTime + 0.05);
-  
-  layers.bass808.gain.gain.setValueAtTime(0, dropTime);
-  layers.bass808.gain.gain.linearRampToValueAtTime(0.9, dropTime + 0.05);
+  // 4. КАК ТОЛЬКО МЕЛОДИЯ ЗАКОНЧИТСЯ - ДЕЛАЕМ ДРОП
+  introMelody.onended = () => {
+    if (isDropped) return;
+    isDropped = true;
 
-  // 5. Включаем логику дропа для UI и кнопок
-  dropTimer = setTimeout(() => {
+    const dropNow = ctx.currentTime;
     log('🔥 ДРОП! Бит пошел.');
-    applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
-  }, (dropTime - ctx.currentTime) * 1000);
+
+    // Мелодию переводим в бесконечный цикл (начиная с текущего момента)
+    const loopMelody = ctx.createBufferSource();
+    loopMelody.buffer = wavBuffers['melody'];
+    loopMelody.loop = true;
+    loopMelody.playbackRate.value = currentRate;
+    loopMelody.connect(layers.melody.gain);
+    loopMelody.start(dropNow);
+    activeSources['melody'] = loopMelody;
+
+    // Резко, но плавно (за 50мс) поднимаем громкость барабанов
+    layers.snare.gain.gain.setTargetAtTime(0.8, dropNow, 0.05);
+    layers.hat.gain.gain.setTargetAtTime(0.6, dropNow, 0.05);
+    layers.bass808.gain.gain.setTargetAtTime(0.9, dropNow, 0.05);
+  };
 }
 
 function log(msg) {
@@ -403,6 +429,9 @@ function log(msg) {
   el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n' + el.textContent;
 }
 
+// ==========================================
+// КНОПКИ
+// ==========================================
 document.querySelectorAll('.var-btn').forEach(btn => {
   btn.addEventListener('click', (e) => {
     document.querySelectorAll('.var-btn').forEach(b => b.classList.remove('active'));
@@ -410,7 +439,9 @@ document.querySelectorAll('.var-btn').forEach(btn => {
     currentVariation = e.target.getAttribute('data-var');
     document.getElementById('modeState').textContent = e.target.textContent.trim();
     log('💥 ' + currentVariation);
-    if (ctx) applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
+    
+    // Применяем только фильтры, аудиофайлы не перезапускаются
+    applyVariationFX(currentVariation);
   });
 });
 
