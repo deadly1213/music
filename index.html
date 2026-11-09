@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Микрофон + Live-вариации)</title>
+<title>Адаптивная музыка (Мгновенные эффекты)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -88,7 +88,7 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка (Микрофон + Live)</h1>
+<h1>🏃 Адаптивная музыка (Мгновенные эффекты)</h1>
 <p>Выберите эффект и включите микрофон. Затем нажмите «Старт».</p>
 
 <div class="variations" id="variationsPanel">
@@ -122,7 +122,7 @@
 </div>
 
 <div class="bar-wrap"><div class="bar" id="intensityBar"></div></div>
-<div id="log">Готов к настройке. Выберите эффект или включите микрофон.</div>
+<div id="log">Готов к настройке.</div>
 
 <script>
 const LAYER_NAMES = ['melody', 'snare', 'hat', 'bass808'];
@@ -143,7 +143,7 @@ let wavBuffers = {};
 let activeSources = {}; 
 let melodyDelay = null, melodyDelayFeedback = null, melodyDryGain = null, melodyWetGain = null;
 let sequencerTimer = null, introTimer = null, isGenerating = false, beatCounter = 0;
-let audioStarted = false; // Флаг, предотвращающий перезапуск
+let audioStarted = false; 
 
 // --- ПЕРЕМЕННЫЕ ДЛЯ МИКРОФОНА ---
 let micActive = false;
@@ -197,6 +197,9 @@ function initAudio() {
     layers[name] = { gain, filter };
   }
   setPlaybackSpeed(1.0, true);
+  
+  // Применяем выбранный эффект сразу при старте аудио-контекста
+  applyVariationFX(currentVariation, 0);
 }
 
 // ==========================================
@@ -221,7 +224,7 @@ async function initMicrophone() {
     document.getElementById('micBtn').textContent = '🎤 Микрофон активен';
     document.getElementById('micMeterWrap').style.display = 'block';
     
-    log('🎤 Микрофон подключен. Проверьте громкость.');
+    log('🎤 Микрофон подключен.');
     
     requestAnimationFrame(updateMicLevel);
   } catch (err) {
@@ -259,7 +262,6 @@ function updateMicLevel() {
 function setPlaybackSpeed(rate, fromSlider = false) {
   if (!ctx) return;
   rate = Math.max(1.0, Math.min(1.35, rate));
-  
   if (Math.abs(rate - currentRate) < 0.005 && !fromSlider) return;
 
   const now = ctx.currentTime;
@@ -327,19 +329,25 @@ setInterval(() => {
 function applyVariationFX(name, x) {
   if (!ctx) return;
   const now = ctx.currentTime;
-  const rT = 0.01; 
+  const rT = 0.01; // Мгновенное применение
 
+  // Сброс всех эффектов
   layers.melody.filter.frequency.setTargetAtTime(4000, now, rT);
   layers.bass808.filter.frequency.setTargetAtTime(80 + 250 * x, now, rT);
   melodyWetGain.gain.setTargetAtTime(0, now, rT);
   melodyDryGain.gain.setTargetAtTime(1.0, now, rT);
 
-  if (name === 'filter') layers.melody.filter.frequency.setTargetAtTime(300, now, rT);
+  // Включение нужного эффекта
+  if (name === 'filter') {
+    layers.melody.filter.frequency.setTargetAtTime(300, now, rT);
+  }
   if (name === 'echo') {
     melodyWetGain.gain.setTargetAtTime(0.9, now, rT);
     melodyDryGain.gain.setTargetAtTime(0.3, now, rT);
   }
-  if (name === 'bass808') layers.bass808.filter.frequency.setTargetAtTime(500, now, rT);
+  if (name === 'bass808') {
+    layers.bass808.filter.frequency.setTargetAtTime(500, now, rT);
+  }
 }
 
 function forceImmediateChange() {
@@ -499,9 +507,14 @@ document.querySelectorAll('.var-btn').forEach(btn => {
     document.getElementById('modeState').textContent = e.target.textContent.trim();
     log('💥 Выбрана вариация: ' + currentVariation);
 
-    if (ctx && isGenerating && ctx.state === 'running') {
+    // УБРАНА ПРОВЕРКА isGenerating, теперь эффекты применяются ВСЕГДА, если есть ctx
+    if (ctx) {
       applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
-      forceImmediateChange();
+      
+      // Если мы уже в режиме генерации, моментально перестраиваем слои
+      if (isGenerating && ctx.state === 'running') {
+        forceImmediateChange();
+      }
     }
   });
 });
@@ -522,7 +535,6 @@ document.getElementById('micBtn').addEventListener('click', async () => {
 document.getElementById('startBtn').addEventListener('click', async () => {
   const btn = document.getElementById('startBtn');
   
-  // 1. ПЕРВЫЙ ЗАПУСК
   if (!audioStarted) {
     audioStarted = true;
     try {
@@ -560,9 +572,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       btn.textContent = '▶️ Старт';
       btn.disabled = false;
     }
-  } 
-  // 2. ПАУЗА / ПРОДОЛЖЕНИЕ
-  else {
+  } else {
     if (ctx.state === 'running') { 
       await ctx.suspend(); 
       clearTimeout(sequencerTimer);
@@ -574,13 +584,12 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       btn.textContent = '⏸ Пауза'; 
       log('▶️ Продолжение');
       
-      // Перезапускаем цикл, так как таймеры были сброшены
       if (isGenerating) {
         stopAllLayers();
         scheduleNextBar();
       } else {
         stopAllLayers();
-        startIntro(); // Перезапуск интро, если пауза была во время него
+        startIntro(); 
       }
     }
   }
