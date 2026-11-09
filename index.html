@@ -5,123 +5,68 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Адаптивная музыка (Железобетонный синхрон)</title>
 <style>
-  body {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #0e0e12;
-    color: #eaeaea;
-    margin: 0 auto;
-    padding: 20px;
-    max-width: 680px;
-  }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0e0e12; color: #eaeaea; margin: 0 auto; padding: 20px; max-width: 680px; }
   h1 { font-size: 22px; margin-bottom: 6px; }
-  p  { color: #aab; font-size: 14px; line-height: 1.5; }
-  button {
-    padding: 12px 16px;
-    font-size: 14px;
-    margin: 6px 6px 6px 0;
-    border-radius: 10px;
-    border: 1px solid #333;
-    background: #1a1a22;
-    color: #ccc;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 0.2s;
-  }
+  p { color: #aab; font-size: 14px; line-height: 1.5; }
+  button { padding: 12px 16px; font-size: 14px; margin: 6px 6px 6px 0; border-radius: 10px; border: 1px solid #333; background: #1a1a22; color: #ccc; cursor: pointer; font-weight: 600; transition: all 0.2s; }
   button:hover { background: #2a2a36; }
   button.active { background: #2fbf71; color: #000; border-color: #2fbf71; box-shadow: 0 0 10px #2fbf71; }
   button.mic-active { background: #e74c3c; color: #fff; border-color: #e74c3c; box-shadow: 0 0 15px #e74c3c; animation: pulse 1s infinite; }
-  
-  @keyframes pulse {
-    0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
-    70% { box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
-  }
-
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(231,76,60,0.7); } 70% { box-shadow: 0 0 0 10px rgba(231,76,60,0); } 100% { box-shadow: 0 0 0 0 rgba(231,76,60,0); } }
   .variations { margin: 20px 0; }
-  
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    margin: 16px 0;
-  }
-  .stat {
-    background: #1a1a22;
-    padding: 12px;
-    border-radius: 10px;
-    text-align: center;
-  }
-  .stat small { color: #889; font-size: 12px; display: block; margin-bottom: 4px; }
-  .stat b { font-size: 18px; color: #2fbf71; }
-  
-  .mic-meter-wrap {
-    background: #1a1a22;
-    height: 10px;
-    border-radius: 5px;
-    overflow: hidden;
-    margin: 10px 0;
-    display: none;
-  }
-  .mic-meter { height: 100%; background: #e74c3c; width: 0%; transition: width 0.05s; }
-
-  .bar-wrap {
-    background: #1a1a22;
-    height: 14px;
-    border-radius: 7px;
-    overflow: hidden;
-    margin: 10px 0 20px;
-  }
-  .bar { height: 100%; background: linear-gradient(90deg,#2fbf71,#f0b429,#e74c3c); width: 0%; transition: width 0.15s; }
-  #log {
-    background: #000;
-    color: #4f4;
-    font-family: monospace;
-    font-size: 12px;
-    padding: 12px;
-    height: 80px;
-    overflow-y: auto;
-    border-radius: 8px;
-    white-space: pre-wrap;
-    line-height: 1.4;
-  }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
+  .stat { background: #1a1a22; padding: 12px; border-radius: 10px; text-align: center; }
+  .stat small { color: #889; font-size: 11px; display: block; margin-bottom: 4px; }
+  .stat b { font-size: 16px; color: #2fbf71; }
+  .meter-wrap { background: #1a1a22; height: 10px; border-radius: 5px; overflow: hidden; margin: 6px 0; }
+  .meter { height: 100%; width: 0%; transition: width 0.08s; }
+  .mic-meter { background: #e74c3c; }
+  .energy-meter { background: #2fbf71; }
+  .space-meter { background: #4aa3ff; }
+  #log { background: #000; color: #4f4; font-family: monospace; font-size: 12px; padding: 12px; height: 100px; overflow-y: auto; border-radius: 8px; white-space: pre-wrap; line-height: 1.4; }
 </style>
 </head>
 <body>
 
 <h1>🏃 Адаптивная музыка (Синхрон)</h1>
-<p>Мелодия сыграет один раз, затем мгновенно врубится бит. Эффекты меняют только фильтры.</p>
+<p>Мелодия играет один раз, затем врубается бит. Шаги = темп и энергия, среда = тембр и пространство.</p>
 
 <div class="variations" id="variationsPanel">
   <button class="var-btn active" data-var="standard">Стандарт</button>
-  <button class="var-btn" data-var="filter">🌑 Фильтр (Глухо)</button>
-  <button class="var-btn" data-var="echo">🌪️ Эхо (Космос)</button>
-  <button class="var-btn" data-var="halftime">🥁 Half-Time (Тяжелый)</button>
-  <button class="var-btn" data-var="bass808">🔊 808 (Давление)</button>
-  <button class="var-btn" data-var="stems">📻 Радио (Тонкий)</button>
+  <button class="var-btn" data-var="filter">🌑 Фильтр</button>
+  <button class="var-btn" data-var="echo">🌪️ Эхо</button>
+  <button class="var-btn" data-var="halftime">🥁 Half-Time</button>
+  <button class="var-btn" data-var="bass808">🔊 808</button>
+  <button class="var-btn" data-var="stems">📻 Радио</button>
 </div>
 
 <button id="micBtn">🎤 Включить микрофон</button>
-<div class="mic-meter-wrap" id="micMeterWrap">
-  <div class="mic-meter" id="micMeter"></div>
+<div style="margin-top:10px;">
+  <small style="color:#889;">Микрофон (RMS):</small>
+  <div class="meter-wrap"><div class="meter mic-meter" id="micMeter"></div></div>
+  <small style="color:#889;">Энергия (шаги):</small>
+  <div class="meter-wrap"><div class="meter energy-meter" id="energyMeter"></div></div>
+  <small style="color:#889;">Пространство (среда):</small>
+  <div class="meter-wrap"><div class="meter space-meter" id="spaceMeter"></div></div>
 </div>
 
-<br><br>
+<br>
 
 <button id="startBtn" style="background:#2fbf71; color:#000; font-size: 16px;">▶️ Старт</button>
-<button id="sliderResetBtn" style="display:none; background:#444; color:#fff;">🔄 Сбросить ручной темп</button>
+<button id="sliderResetBtn" style="display:none; background:#444; color:#fff;">🔄 Вернуть автоматику</button>
 
-<div class="slider-row" style="margin: 18px 0;">
-  <label>Скорость вручную: <span id="sliderVal">1.00x</span></label>
-  <input type="range" id="slider" min="1.00" max="1.35" step="0.01" value="1.00" disabled style="width:100%;">
+<div style="margin: 18px 0;">
+  <label>Множитель скорости: <span id="sliderVal">1.00x</span></label>
+  <input type="range" id="slider" min="0.85" max="1.20" step="0.01" value="1.00" disabled style="width:100%;">
 </div>
 
 <div class="stats">
   <div class="stat"><small>Шагов/мин</small><b id="cadence">0</b></div>
   <div class="stat"><small>Скорость</small><b id="playbackRate">1.00x</b></div>
-  <div class="stat"><small>Вариация</small><b id="modeState" style="font-size:14px;">Стандарт</b></div>
+  <div class="stat"><small>Энергия</small><b id="energyVal">0%</b></div>
+  <div class="stat"><small>Пространство</small><b id="spaceVal">0%</b></div>
 </div>
 
-<div class="bar-wrap"><div class="bar" id="intensityBar"></div></div>
 <div id="log">Готов к настройке.</div>
 
 <script>
@@ -133,32 +78,54 @@ const LAYER_FILES = {
   bass808: './808.wav'
 };
 
-let ctx = null, masterGain = null, limiter = null, layers = null; 
+let ctx = null, masterGain = null, limiter = null, layers = null;
 let currentRate = 1.0;
-let currentVariation = 'standard'; 
-let sliderOverrideUntil = 0;
+let currentVariation = 'standard';
 let wavBuffers = {};
-let activeSources = {}; 
+let activeSources = {};
 let melodyDelay = null, melodyDelayFeedback = null, melodyDryGain = null, melodyWetGain = null;
-let audioStarted = false; 
+let bass808SidechainGain = null;
+let audioStarted = false;
 
 let isDropped = false;
 let isPlaying = false;
 let dropTime = 0;
 let dropTimerId = null;
-
-// Переменные для абсолютной синхронизации при паузе
-let bufferTime = 0; 
+let bufferTime = 0;
 let trackStartTime = 0;
 
+// Микрофон
 let micActive = false;
-let analyser = null;
-let micDataArray = null;
 let micStream = null;
-let micLevel = 0; 
+let envAnalyser = null, stepAnalyser = null;
+let envDataArray = null, stepTimeDataArray = null;
 
+// Анализ
+let micRMS = 0, micCentroid = 0, micLowRatio = 0, micHighRatio = 0;
+let micStepRMS = 0, micStepAvg = 0.005, micAboveThreshold = false;
+
+// Сглаженные параметры
+let energySmooth = 0, spaceSmooth = 0, brightnessSmooth = 0;
+
+// Ручной оверрайд слайдера
+let sliderOverrideUntil = 0;
+let sliderMultiplier = 1.0;
+
+// Шаги
+let motionActive = false, motionEventCount = 0;
+let stepTimestamps = [];
+let lastStepTime = 0, aboveThreshold = false;
+let dynamicHigh = 11.0, dynamicLow = 9.8, gravityMag = 9.8;
+
+// Тайминги
+let lastControlUpdate = 0;
+let lastSpeedChange = 0;
+
+// ==========================================
+// ИНИЦИАЛИЗАЦИЯ
+// ==========================================
 function initAudio() {
-  if (ctx) return; 
+  if (ctx) return;
   ctx = new (window.AudioContext || window.webkitAudioContext)();
   masterGain = ctx.createGain();
   masterGain.gain.value = 0.55;
@@ -196,76 +163,310 @@ function initAudio() {
       filter.connect(melodyDelay);
       melodyDelay.connect(melodyDelayFeedback).connect(melodyDelay);
       melodyDelay.connect(melodyWetGain).connect(masterGain);
+    } else if (name === 'bass808') {
+      // sidechain-gain врезается между фильтром и основным gain
+      bass808SidechainGain = ctx.createGain();
+      bass808SidechainGain.gain.value = 1.0;
+      gain.connect(filter).connect(bass808SidechainGain).connect(masterGain);
     } else {
       gain.connect(filter).connect(masterGain);
     }
     layers[name] = { gain, filter };
   }
-  applyVariationFX(currentVariation);
 }
 
+// ==========================================
+// МИКРОФОН: ДВА АНАЛИЗАТОРА
+// ==========================================
 async function initMicrophone() {
   try {
     if (!ctx) initAudio();
-    await ctx.resume(); 
+    await ctx.resume();
 
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const source = ctx.createMediaStreamSource(micStream);
-    analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    source.connect(analyser);
-    micDataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    // Путь 1: шаги (низкие частоты)
+    const stepFilter = ctx.createBiquadFilter();
+    stepFilter.type = 'lowpass';
+    stepFilter.frequency.value = 150;
+    stepFilter.Q.value = 0.7;
+    stepAnalyser = ctx.createAnalyser();
+    stepAnalyser.fftSize = 256;
+    source.connect(stepFilter).connect(stepAnalyser);
+    stepTimeDataArray = new Uint8Array(stepAnalyser.fftSize);
+
+    // Путь 2: среда (полный спектр)
+    envAnalyser = ctx.createAnalyser();
+    envAnalyser.fftSize = 1024;
+    source.connect(envAnalyser);
+    envDataArray = new Uint8Array(envAnalyser.frequencyBinCount);
+
     micActive = true;
-    
     document.getElementById('micBtn').classList.add('mic-active');
     document.getElementById('micBtn').textContent = '🎤 Микрофон активен';
-    document.getElementById('micMeterWrap').style.display = 'block';
-    log('🎤 Микрофон подключен.');
-    
-    requestAnimationFrame(updateMicLevel);
+    log('🎤 Микрофон подключен (2 анализатора).');
+
+    requestAnimationFrame(updateMicAnalysis);
   } catch (err) {
     log('❌ Ошибка микрофона: ' + err.message);
   }
 }
 
-function updateMicLevel() {
-  if (!micActive || !analyser) return;
-  analyser.getByteTimeDomainData(micDataArray);
-  let sum = 0;
-  for (let i = 0; i < micDataArray.length; i++) {
-    const x = (micDataArray[i] - 128) / 128.0;
-    sum += x * x;
-  }
-  const rms = Math.sqrt(sum / micDataArray.length);
-  
-  micLevel = (micLevel * 0.8) + (rms * 0.2);
-  document.getElementById('micMeter').style.width = Math.min(100, micLevel * 300) + '%';
+function updateMicAnalysis() {
+  if (!micActive) { return; }
+  const now = performance.now();
 
-  if (micActive && performance.now() > sliderOverrideUntil) {
-    const intensity = Math.max(0, Math.min(1, (micLevel - 0.02) * 15));
-    setPlaybackSpeed(1.0 + (intensity * 0.35));
+  // --- Анализ среды ---
+  envAnalyser.getByteFrequencyData(envDataArray);
+  const binHz = ctx.sampleRate / envAnalyser.fftSize;
+  let sumSq = 0, numC = 0, denC = 0, lowSum = 0, highSum = 0;
+  for (let i = 1; i < envDataArray.length; i++) {
+    const mag = envDataArray[i] / 255;
+    const freq = i * binHz;
+    sumSq += mag * mag;
+    numC += freq * mag;
+    denC += mag;
+    if (freq < 500) lowSum += mag;
+    else if (freq > 4000) highSum += mag;
   }
-  requestAnimationFrame(updateMicLevel);
+  const rms = Math.sqrt(sumSq / envDataArray.length);
+  const centroid = denC > 0 ? numC / denC : 0;
+  const total = lowSum + highSum + 0.001;
+
+  // EMA-сглаживание (≈300 мс)
+  micRMS = micRMS * 0.9 + rms * 0.1;
+  micCentroid = micCentroid * 0.9 + centroid * 0.1;
+  micLowRatio = micLowRatio * 0.9 + (lowSum / total) * 0.1;
+  micHighRatio = micHighRatio * 0.9 + (highSum / total) * 0.1;
+
+  document.getElementById('micMeter').style.width = Math.min(100, micRMS * 400) + '%';
+
+  // --- Детектор шагов ---
+  stepAnalyser.getByteTimeDomainData(stepTimeDataArray);
+  let stepSq = 0;
+  for (let i = 0; i < stepTimeDataArray.length; i++) {
+    const x = (stepTimeDataArray[i] - 128) / 128;
+    stepSq += x * x;
+  }
+  micStepRMS = Math.sqrt(stepSq / stepTimeDataArray.length);
+  micStepAvg = micStepAvg * 0.995 + micStepRMS * 0.005;
+
+  const threshold = Math.max(micStepAvg * 2.5, micStepAvg + 0.015, 0.02);
+
+  if (micStepRMS > threshold && !micAboveThreshold && now - lastStepTime > 180) {
+    lastStepTime = now;
+    stepTimestamps.push(now);
+    if (stepTimestamps.length > 50) stepTimestamps.shift();
+    triggerStepClick();
+    trigger808Sidechain();
+    micAboveThreshold = true;
+  } else if (micStepRMS < threshold * 0.6) {
+    micAboveThreshold = false;
+  }
+
+  requestAnimationFrame(updateMicAnalysis);
 }
 
-function setPlaybackSpeed(rate, fromSlider = false) {
+// ==========================================
+// ДАТЧИК ДВИЖЕНИЯ (фолбэк, если микрофон выкл)
+// ==========================================
+function handleMotion(event) {
+  if (performance.now() < sliderOverrideUntil || micActive) return;
+  const acc = event.accelerationIncludingGravity;
+  if (!acc) return;
+  motionEventCount++;
+  if (motionEventCount < 3) return;
+  if (!motionActive) motionActive = true;
+
+  const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+  if (mag > 9.0 && mag < 10.5 && performance.now() - lastStepTime > 1500) {
+    gravityMag = gravityMag * 0.95 + mag * 0.05;
+    dynamicHigh = gravityMag + 1.5;
+    dynamicLow = gravityMag + 0.2;
+  }
+  if (mag > dynamicHigh && !aboveThreshold) {
+    const now = performance.now();
+    if (now - lastStepTime > 180) {
+      lastStepTime = now;
+      stepTimestamps.push(now);
+      if (stepTimestamps.length > 50) stepTimestamps.shift();
+      triggerStepClick();
+      trigger808Sidechain();
+    }
+    aboveThreshold = true;
+  } else if (mag < dynamicLow) {
+    aboveThreshold = false;
+  }
+}
+
+// ==========================================
+// СИНТЕЗ КЛИКА ШАГА И SIDECHAIN 808
+// ==========================================
+function triggerStepClick() {
+  if (!ctx || !isPlaying) return;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(130, now);
+  osc.frequency.exponentialRampToValueAtTime(50, now + 0.08);
+  g.gain.setValueAtTime(0.18, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+  osc.connect(g).connect(masterGain);
+  osc.start(now);
+  osc.stop(now + 0.2);
+}
+
+function trigger808Sidechain() {
+  if (!bass808SidechainGain || !isDropped) return;
+  const now = ctx.currentTime;
+  const g = bass808SidechainGain.gain;
+  g.cancelScheduledValues(now);
+  g.setValueAtTime(1.0, now);
+  g.linearRampToValueAtTime(0.35, now + 0.02);
+  g.linearRampToValueAtTime(1.0, now + 0.25);
+}
+
+// ==========================================
+// АДАПТИВНЫЕ ПАРАМЕТРЫ (10 Гц)
+// ==========================================
+function updateControl() {
+  if (!ctx || !isPlaying) return;
+  const now = performance.now();
+  if (now - lastControlUpdate < 100) return;
+  lastControlUpdate = now;
+
+  // Cadence
+  const t = performance.now();
+  stepTimestamps = stepTimestamps.filter(ts => t - ts < 4000);
+  const cadence = stepTimestamps.length * 15;
+  document.getElementById('cadence').textContent = cadence.toFixed(0);
+
+  // Целевые значения
+  const energyTarget = Math.min(1, Math.max(0, (cadence - 70) / 100));
+  const spaceTarget = Math.min(1, Math.max(0, (micRMS - 0.01) * 20));
+  const brightnessTarget = Math.min(1, Math.max(0, micCentroid / 4000));
+
+  energySmooth += (energyTarget - energySmooth) * 0.15;
+  spaceSmooth  += (spaceTarget  - spaceSmooth)  * 0.08;
+  brightnessSmooth += (brightnessTarget - brightnessSmooth) * 0.08;
+
+  document.getElementById('energyMeter').style.width = (energySmooth * 100) + '%';
+  document.getElementById('spaceMeter').style.width = (spaceSmooth * 100) + '%';
+  document.getElementById('energyVal').textContent = Math.round(energySmooth * 100) + '%';
+  document.getElementById('spaceVal').textContent = Math.round(spaceSmooth * 100) + '%';
+
+  applyAdaptiveParams(energySmooth, spaceSmooth, brightnessSmooth, cadence);
+
+  // Скорость — не чаще 5 Гц и только если слайдер не перехватил
+  if (now > sliderOverrideUntil && now - lastSpeedChange > 200) {
+    lastSpeedChange = now;
+    let baseRate = 1.0;
+    if (cadence > 130) {
+      baseRate = 1.0 + ((cadence - 130) / 70) * 0.35;
+    }
+    const rate = Math.max(1.0, Math.min(1.35, baseRate));
+    setPlaybackSpeed(rate, false);
+  }
+}
+
+function applyAdaptiveParams(energy, space, brightness, cadence) {
   if (!ctx) return;
-  rate = Math.max(1.0, Math.min(1.35, rate));
-  if (Math.abs(rate - currentRate) < 0.005 && !fromSlider) return;
+  const now = ctx.currentTime;
+  const t = 0.15;
+
+  // Мелодия: яркость среды → cutoff
+  const melodyCutoff = 800 + brightness * 12000;
+
+  if (!isDropped) {
+    layers.melody.filter.frequency.setTargetAtTime(melodyCutoff, now, t);
+    return;
+  }
+
+  // После дропа адаптивка работает со всеми слоями
+  switch (currentVariation) {
+    case 'standard': {
+      layers.melody.filter.frequency.setTargetAtTime(melodyCutoff, now, t);
+      layers.melody.filter.Q.setTargetAtTime(0.7, now, t);
+      melodyWetGain.gain.setTargetAtTime(0.1 + space * 0.5, now, t);
+      melodyDryGain.gain.setTargetAtTime(1.0 - space * 0.3, now, t);
+      layers.snare.gain.gain.setTargetAtTime(0.2 + energy * 0.55, now, t);
+      layers.hat.gain.gain.setTargetAtTime(0.15 + energy * 0.45 + micHighRatio * 0.2, now, t);
+      layers.bass808.filter.frequency.setTargetAtTime(120 + micLowRatio * 300, now, t);
+      break;
+    }
+    case 'filter': {
+      layers.melody.filter.frequency.setTargetAtTime(250 + brightness * 900, now, t);
+      layers.melody.filter.Q.setTargetAtTime(4.0, now, t);
+      melodyWetGain.gain.setTargetAtTime(0.05 + space * 0.15, now, t);
+      melodyDryGain.gain.setTargetAtTime(1.0, now, t);
+      layers.snare.gain.gain.setTargetAtTime(0.15 + energy * 0.35, now, t);
+      layers.hat.gain.gain.setTargetAtTime(0.05 + energy * 0.15, now, t);
+      layers.bass808.filter.frequency.setTargetAtTime(70 + micLowRatio * 100, now, t);
+      break;
+    }
+    case 'echo': {
+      // Delay синхронизирован с BPM шагов
+      const bpm = Math.max(70, Math.min(160, cadence));
+      const delayTime = Math.max(0.05, (60 / bpm) * 0.75);
+      melodyDelay.delayTime.setTargetAtTime(delayTime, now, 0.2);
+      melodyDelayFeedback.gain.setTargetAtTime(0.35 + space * 0.4, now, t);
+      melodyWetGain.gain.setTargetAtTime(0.4 + space * 0.5, now, t);
+      melodyDryGain.gain.setTargetAtTime(0.7 - space * 0.3, now, t);
+      layers.melody.filter.frequency.setTargetAtTime(3000 + brightness * 9000, now, t);
+      layers.snare.gain.gain.setTargetAtTime(0.2 + energy * 0.4, now, t);
+      layers.hat.gain.gain.setTargetAtTime(0.1 + energy * 0.3, now, t);
+      break;
+    }
+    case 'halftime': {
+      layers.melody.filter.frequency.setTargetAtTime(500 + brightness * 500, now, t);
+      layers.melody.filter.Q.setTargetAtTime(2.0, now, t);
+      melodyWetGain.gain.setTargetAtTime(0.1 + space * 0.2, now, t);
+      melodyDryGain.gain.setTargetAtTime(1.0, now, t);
+      layers.snare.gain.gain.setTargetAtTime(0.4 + energy * 0.5, now, t);
+      layers.hat.gain.gain.setTargetAtTime(0.03 + energy * 0.12, now, t);
+      layers.bass808.filter.frequency.setTargetAtTime(100 + micLowRatio * 200, now, t);
+      break;
+    }
+    case 'bass808': {
+      layers.melody.filter.frequency.setTargetAtTime(700 + brightness * 2000, now, t);
+      melodyWetGain.gain.setTargetAtTime(0.1 + space * 0.3, now, t);
+      melodyDryGain.gain.setTargetAtTime(1.0, now, t);
+      layers.snare.gain.gain.setTargetAtTime(0.15 + energy * 0.3, now, t);
+      layers.hat.gain.gain.setTargetAtTime(0.1 + energy * 0.25, now, t);
+      layers.bass808.filter.frequency.setTargetAtTime(250 + micLowRatio * 450, now, t);
+      break;
+    }
+    case 'stems': {
+      layers.melody.filter.frequency.setTargetAtTime(900 + brightness * 2200, now, t);
+      melodyWetGain.gain.setTargetAtTime(0.05 + space * 0.15, now, t);
+      melodyDryGain.gain.setTargetAtTime(1.0, now, t);
+      layers.snare.gain.gain.setTargetAtTime(0.15 + energy * 0.35, now, t);
+      layers.hat.gain.gain.setTargetAtTime(0.08 + energy * 0.2 + micHighRatio * 0.15, now, t);
+      layers.bass808.filter.frequency.setTargetAtTime(60 + micLowRatio * 80, now, t);
+      break;
+    }
+  }
+}
+
+// ==========================================
+// СКОРОСТЬ
+// ==========================================
+function setPlaybackSpeed(rate, fromSlider) {
+  if (!ctx) return;
+  rate = Math.max(0.85, Math.min(1.35, rate));
+  if (Math.abs(rate - currentRate) < 0.008) return;
 
   const now = ctx.currentTime;
-  
-  // Если мы играем, фиксируем время, прошедшее с момента старта/последней смены скорости
   if (isPlaying) {
     bufferTime += (now - trackStartTime) * currentRate;
     trackStartTime = now;
-    
-    // Пересчитываем время дропа, если мы всё ещё в интро
     if (!isDropped) {
       const introDuration = wavBuffers['melody'].duration;
       if (bufferTime < introDuration) {
-        const remainingBuffer = introDuration - bufferTime;
-        dropTime = now + (remainingBuffer / rate);
+        const remaining = introDuration - bufferTime;
+        dropTime = now + (remaining / rate);
         applyDropGains();
         scheduleDropTimer();
       } else {
@@ -280,10 +481,7 @@ function setPlaybackSpeed(rate, fromSlider = false) {
     }
   }
   currentRate = rate;
-  
   document.getElementById('playbackRate').textContent = rate.toFixed(2) + 'x';
-  document.getElementById('intensityBar').style.width = ((rate - 1.0) / 0.35) * 100 + '%';
-  
   if (!fromSlider) {
     document.getElementById('slider').value = rate;
     document.getElementById('sliderVal').textContent = rate.toFixed(2) + 'x';
@@ -291,107 +489,19 @@ function setPlaybackSpeed(rate, fromSlider = false) {
 }
 
 // ==========================================
-// ДАТЧИК ДВИЖЕНИЯ
-// ==========================================
-let motionActive = false, motionEventCount = 0, stepTimestamps = [];
-let lastStepTime = 0, aboveThreshold = false;
-let dynamicHigh = 11.0, dynamicLow = 9.8, gravityMag = 9.8;   
-
-function handleMotion(event) {
-  if (performance.now() < sliderOverrideUntil || micActive) return; 
-  const acc = event.accelerationIncludingGravity;
-  if (!acc) return;
-  motionEventCount++;
-  if (motionEventCount < 3) return;
-  if (!motionActive) { motionActive = true; }
-
-  const mag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
-  if (mag > 9.0 && mag < 10.5 && performance.now() - lastStepTime > 1500) {
-    gravityMag = (gravityMag * 0.95) + (mag * 0.05);
-    dynamicHigh = gravityMag + 1.5;
-    dynamicLow = gravityMag + 0.2;
-  }
-  if (mag > dynamicHigh && !aboveThreshold) {
-    const now = performance.now();
-    if (now - lastStepTime > 180) { 
-      lastStepTime = now;
-      stepTimestamps.push(now);
-      if (stepTimestamps.length > 50) stepTimestamps.shift();
-    }
-    aboveThreshold = true;
-  } else if (mag < dynamicLow) {
-    aboveThreshold = false;
-  }
-}
-
-setInterval(() => {
-  if (!motionActive || performance.now() < sliderOverrideUntil || micActive || !isPlaying) return;
-  const now = performance.now();
-  stepTimestamps = stepTimestamps.filter(t => now - t < 4000); 
-  const cadence = stepTimestamps.length * 15;
-  document.getElementById('cadence').textContent = cadence.toFixed(0);
-
-  let targetRate = 1.0;
-  if (cadence > 130) {
-    const speedFactor = (cadence - 130) / 70; 
-    targetRate = 1.0 + (speedFactor * 0.35); 
-  }
-  setPlaybackSpeed(Math.max(1.0, Math.min(1.35, targetRate)));
-}, 500); 
-
-// ==========================================
-// ЭФФЕКТЫ (ТОЛЬКО ФИЛЬТРЫ)
-// ==========================================
-function applyVariationFX(name) {
-  if (!ctx) return;
-  const now = ctx.currentTime;
-  const rT = 0.1; 
-
-  layers.melody.filter.frequency.setTargetAtTime(20000, now, rT);
-  layers.snare.filter.frequency.setTargetAtTime(100, now, rT);
-  layers.hat.filter.frequency.setTargetAtTime(3000, now, rT);
-  layers.bass808.filter.frequency.setTargetAtTime(200, now, rT);
-  melodyWetGain.gain.setTargetAtTime(0, now, rT);
-  melodyDryGain.gain.setTargetAtTime(1.0, now, rT);
-
-  if (name === 'filter') layers.melody.filter.frequency.setTargetAtTime(400, now, rT);
-  else if (name === 'echo') {
-    melodyWetGain.gain.setTargetAtTime(0.9, now, rT);
-    melodyDryGain.gain.setTargetAtTime(0.3, now, rT);
-  }
-  else if (name === 'halftime') {
-    layers.melody.filter.frequency.setTargetAtTime(800, now, rT);
-    layers.hat.filter.frequency.setTargetAtTime(1000, now, rT);
-    layers.snare.filter.frequency.setTargetAtTime(300, now, rT);
-  }
-  else if (name === 'bass808') {
-    layers.bass808.filter.frequency.setTargetAtTime(600, now, rT);
-    layers.melody.filter.frequency.setTargetAtTime(1000, now, rT);
-  }
-  else if (name === 'stems') {
-    layers.melody.filter.frequency.setTargetAtTime(1500, now, rT);
-    layers.bass808.filter.frequency.setTargetAtTime(100, now, rT);
-  }
-}
-
-// ==========================================
-// МЕХАНИЗМ ДРОПА
+// ДРОП
 // ==========================================
 function applyDropGains() {
   const now = ctx.currentTime;
-  const targetDrop = Math.max(now + 0.05, dropTime); 
-
-  layers.snare.gain.gain.cancelScheduledValues(now);
-  layers.snare.gain.gain.setValueAtTime(0.0, targetDrop - 0.01); 
-  layers.snare.gain.gain.linearRampToValueAtTime(0.8, targetDrop + 0.05);
-  
-  layers.hat.gain.gain.cancelScheduledValues(now);
-  layers.hat.gain.gain.setValueAtTime(0.0, targetDrop - 0.01);
-  layers.hat.gain.gain.linearRampToValueAtTime(0.6, targetDrop + 0.05);
-  
-  layers.bass808.gain.gain.cancelScheduledValues(now);
-  layers.bass808.gain.gain.setValueAtTime(0.0, targetDrop - 0.01);
-  layers.bass808.gain.gain.linearRampToValueAtTime(0.9, targetDrop + 0.05);
+  const targetDrop = Math.max(now + 0.05, dropTime);
+  const setRamp = (g, target) => {
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(0.0, targetDrop - 0.01);
+    g.linearRampToValueAtTime(target, targetDrop + 0.05);
+  };
+  setRamp(layers.snare.gain.gain, 0.7);
+  setRamp(layers.hat.gain.gain, 0.5);
+  setRamp(layers.bass808.gain.gain, 0.9);
 }
 
 function scheduleDropTimer() {
@@ -408,15 +518,15 @@ function scheduleDropTimer() {
 }
 
 // ==========================================
-// ЗАПУСК, ПАУЗА И ПРОДОЛЖЕНИЕ
+// ЗАПУСК / ПАУЗА / ПРОДОЛЖЕНИЕ
 // ==========================================
 async function loadAllWavs() {
   for (const name of LAYER_NAMES) {
     try {
       const response = await fetch(LAYER_FILES[name]);
       if (!response.ok) throw new Error('HTTP ' + response.status);
-      const arrayBuffer = await response.arrayBuffer();
-      wavBuffers[name] = await ctx.decodeAudioData(arrayBuffer);
+      const ab = await response.arrayBuffer();
+      wavBuffers[name] = await ctx.decodeAudioData(ab);
     } catch (err) { throw new Error('Файл не найден: ' + LAYER_FILES[name]); }
   }
   log('✅ Аудио загружено. Запуск...');
@@ -449,23 +559,21 @@ function startEngine() {
 
   applyDropGains();
   scheduleDropTimer();
-  log('▶️ Интро: Мелодия играет один раз...');
+  log('▶️ Интро: мелодия играет один раз...');
+
+  setInterval(updateControl, 100);
 }
 
 async function pauseAudio() {
   if (!isPlaying) return;
   isPlaying = false;
-  
-  // Запоминаем точное время в буфере
   bufferTime += (ctx.currentTime - trackStartTime) * currentRate;
-  
   for (const name in activeSources) {
     if (activeSources[name]) {
       try { activeSources[name].stop(); } catch(e){}
       activeSources[name] = null;
     }
   }
-  
   if (dropTimerId) clearTimeout(dropTimerId);
   await ctx.suspend();
 }
@@ -474,41 +582,34 @@ async function resumeAudio() {
   if (isPlaying) return;
   await ctx.resume();
   isPlaying = true;
-  
   trackStartTime = ctx.currentTime;
   const introDuration = wavBuffers['melody'].duration;
-  
-  // Пересоздаем все источники с точным смещением (offset)
+
   LAYER_NAMES.forEach(name => {
     const src = ctx.createBufferSource();
     src.buffer = wavBuffers[name];
     src.loop = true;
     src.playbackRate.value = currentRate;
     src.connect(layers[name].gain);
-    
     const offset = bufferTime % wavBuffers[name].duration;
     src.start(trackStartTime, offset);
     activeSources[name] = src;
   });
-  
-  // Восстанавливаем состояние громкости (до дропа или после)
+
   if (bufferTime < introDuration) {
     isDropped = false;
-    const remainingBuffer = introDuration - bufferTime;
-    dropTime = trackStartTime + (remainingBuffer / currentRate);
-    
+    dropTime = trackStartTime + ((introDuration - bufferTime) / currentRate);
     layers.melody.gain.gain.setValueAtTime(1.0, trackStartTime);
     layers.snare.gain.gain.setValueAtTime(0.0, trackStartTime);
     layers.hat.gain.gain.setValueAtTime(0.0, trackStartTime);
     layers.bass808.gain.gain.setValueAtTime(0.0, trackStartTime);
-    
     applyDropGains();
     scheduleDropTimer();
   } else {
     isDropped = true;
     layers.melody.gain.gain.setValueAtTime(1.0, trackStartTime);
-    layers.snare.gain.gain.setValueAtTime(0.8, trackStartTime);
-    layers.hat.gain.gain.setValueAtTime(0.6, trackStartTime);
+    layers.snare.gain.gain.setValueAtTime(0.7, trackStartTime);
+    layers.hat.gain.gain.setValueAtTime(0.5, trackStartTime);
     layers.bass808.gain.gain.setValueAtTime(0.9, trackStartTime);
   }
 }
@@ -518,14 +619,15 @@ function log(msg) {
   el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n' + el.textContent;
 }
 
+// ==========================================
+// UI
+// ==========================================
 document.querySelectorAll('.var-btn').forEach(btn => {
   btn.addEventListener('click', (e) => {
     document.querySelectorAll('.var-btn').forEach(b => b.classList.remove('active'));
     e.target.classList.add('active');
     currentVariation = e.target.getAttribute('data-var');
-    document.getElementById('modeState').textContent = e.target.textContent.trim();
     log('💥 ' + currentVariation);
-    if (ctx) applyVariationFX(currentVariation);
   });
 });
 
@@ -535,16 +637,18 @@ document.getElementById('micBtn').addEventListener('click', async () => {
   } else {
     micActive = false;
     if (micStream) micStream.getTracks().forEach(t => t.stop());
+    micStream = null;
     document.getElementById('micBtn').classList.remove('mic-active');
     document.getElementById('micBtn').textContent = '🎤 Включить микрофон';
-    document.getElementById('micMeterWrap').style.display = 'none';
+    document.getElementById('micMeter').style.width = '0%';
+    // Сбрасываем анализ
+    micRMS = micCentroid = micLowRatio = micHighRatio = 0;
     log('🎤 Микрофон выключен.');
   }
 });
 
 document.getElementById('startBtn').addEventListener('click', async () => {
   const btn = document.getElementById('startBtn');
-  
   if (!audioStarted) {
     audioStarted = true;
     try {
@@ -559,13 +663,14 @@ document.getElementById('startBtn').addEventListener('click', async () => {
           window.addEventListener('devicemotion', handleMotion);
         }
       }
-      
+
       document.getElementById('slider').disabled = false;
       document.getElementById('slider').addEventListener('input', (e) => {
         if (!ctx) return;
         sliderOverrideUntil = performance.now() + 5000;
         document.getElementById('sliderResetBtn').style.display = 'inline-block';
         const v = parseFloat(e.target.value);
+        sliderMultiplier = v;
         document.getElementById('sliderVal').textContent = v.toFixed(2) + 'x';
         setPlaybackSpeed(v, true);
       });
@@ -573,7 +678,6 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       btn.textContent = '⏳ Загрузка…';
       btn.disabled = true;
       await loadAllWavs();
-      
       btn.textContent = '⏸ Пауза';
       btn.disabled = false;
     } catch (e) {
@@ -583,13 +687,13 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       btn.disabled = false;
     }
   } else {
-    if (isPlaying) { 
-      await pauseAudio(); 
-      btn.textContent = '▶️ Продолжить'; 
+    if (isPlaying) {
+      await pauseAudio();
+      btn.textContent = '▶️ Продолжить';
       log('⏸ Пауза');
-    } else { 
-      await resumeAudio(); 
-      btn.textContent = '⏸ Пауза'; 
+    } else {
+      await resumeAudio();
+      btn.textContent = '⏸ Пауза';
       log('▶️ Продолжение');
     }
   }
@@ -597,8 +701,9 @@ document.getElementById('startBtn').addEventListener('click', async () => {
 
 document.getElementById('sliderResetBtn').addEventListener('click', () => {
   sliderOverrideUntil = 0;
+  sliderMultiplier = 1.0;
   document.getElementById('sliderResetBtn').style.display = 'none';
-  log('🔄 Управление возвращено датчикам.');
+  log('🔄 Автоматика восстановлена.');
 });
 </script>
 </body>
