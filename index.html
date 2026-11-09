@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Мгновенные эффекты)</title>
+<title>Адаптивная музыка (Бесконечный поток)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -88,7 +88,7 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка (Мгновенные эффекты)</h1>
+<h1>🏃 Адаптивная музыка (Бесконечный поток)</h1>
 <p>Выберите эффект и включите микрофон. Затем нажмите «Старт».</p>
 
 <div class="variations" id="variationsPanel">
@@ -145,7 +145,6 @@ let melodyDelay = null, melodyDelayFeedback = null, melodyDryGain = null, melody
 let sequencerTimer = null, introTimer = null, isGenerating = false, beatCounter = 0;
 let audioStarted = false; 
 
-// --- ПЕРЕМЕННЫЕ ДЛЯ МИКРОФОНА ---
 let micActive = false;
 let analyser = null;
 let micDataArray = null;
@@ -196,9 +195,6 @@ function initAudio() {
     }
     layers[name] = { gain, filter };
   }
-  setPlaybackSpeed(1.0, true);
-  
-  // Применяем выбранный эффект сразу при старте аудио-контекста
   applyVariationFX(currentVariation, 0);
 }
 
@@ -329,43 +325,38 @@ setInterval(() => {
 function applyVariationFX(name, x) {
   if (!ctx) return;
   const now = ctx.currentTime;
-  const rT = 0.01; // Мгновенное применение
+  const rT = 0.01; 
 
-  // Сброс всех эффектов
   layers.melody.filter.frequency.setTargetAtTime(4000, now, rT);
   layers.bass808.filter.frequency.setTargetAtTime(80 + 250 * x, now, rT);
   melodyWetGain.gain.setTargetAtTime(0, now, rT);
   melodyDryGain.gain.setTargetAtTime(1.0, now, rT);
 
-  // Включение нужного эффекта
-  if (name === 'filter') {
-    layers.melody.filter.frequency.setTargetAtTime(300, now, rT);
-  }
+  if (name === 'filter') layers.melody.filter.frequency.setTargetAtTime(300, now, rT);
   if (name === 'echo') {
     melodyWetGain.gain.setTargetAtTime(0.9, now, rT);
     melodyDryGain.gain.setTargetAtTime(0.3, now, rT);
   }
-  if (name === 'bass808') {
-    layers.bass808.filter.frequency.setTargetAtTime(500, now, rT);
-  }
+  if (name === 'bass808') layers.bass808.filter.frequency.setTargetAtTime(500, now, rT);
 }
 
+// ==========================================
+// НОВАЯ ФУНКЦИЯ: Меняет только громкость (без рестарта)
+// ==========================================
 function forceImmediateChange() {
-  if (!ctx || !isGenerating) return;
-  
+  if (!ctx || !isGenerating || ctx.state !== 'running') return;
   const now = ctx.currentTime;
-  const startTime = now + 0.05; 
   const x = (currentRate - 1.0) / 0.35;
-
-  playLayer('melody', startTime, false);
 
   let play808 = false, playSnare = false, playHat = false;
 
   if (currentVariation === 'stems') {
-    play808 = false; playSnare = false; playHat = false;
+    play808 = x > 0.1;
+    playSnare = x > 0.4;
+    playHat = x > 0.7;
   } 
   else if (currentVariation === 'halftime') {
-    play808 = true; 
+    play808 = true;
     playSnare = (beatCounter % 2 === 0); 
     playHat = (beatCounter % 4 === 0);
   } 
@@ -376,17 +367,10 @@ function forceImmediateChange() {
     play808 = true; playSnare = true; playHat = true;
   }
 
-  layers.bass808.gain.gain.setTargetAtTime(play808 ? (0.2 + 0.8 * x) : 0, now, 0.01);
-  layers.snare.gain.gain.setTargetAtTime(playSnare ? (0.1 + 0.8 * x) : 0, now, 0.01);
-  layers.hat.gain.gain.setTargetAtTime(playHat ? (0.1 + 0.7 * x) : 0, now, 0.01);
-
-  if (play808 && !activeSources['bass808']) playLayer('bass808', startTime, false);
-  if (playSnare && !activeSources['snare']) playLayer('snare', startTime, false);
-  if (playHat && !activeSources['hat']) playLayer('hat', startTime, false);
-
-  if (!play808 && activeSources['bass808']) { try { activeSources['bass808'].stop(now); } catch(e){} activeSources['bass808'] = null; }
-  if (!playSnare && activeSources['snare']) { try { activeSources['snare'].stop(now); } catch(e){} activeSources['snare'] = null; }
-  if (!playHat && activeSources['hat']) { try { activeSources['hat'].stop(now); } catch(e){} activeSources['hat'] = null; }
+  // Мгновенно меняем громкость, музыка не останавливается!
+  layers.bass808.gain.gain.setTargetAtTime(play808 ? (0.2 + 0.8 * x) : 0, now, 0.05);
+  layers.snare.gain.gain.setTargetAtTime(playSnare ? (0.1 + 0.8 * x) : 0, now, 0.05);
+  layers.hat.gain.gain.setTargetAtTime(playHat ? (0.1 + 0.7 * x) : 0, now, 0.05);
 }
 
 // ==========================================
@@ -414,13 +398,14 @@ async function loadAllWavs() {
   startIntro();
 }
 
-function playLayer(name, time, isIntro = false) {
+// Функция запуска источника (вызывается только 1 раз!)
+function playLayer(name, time, shouldLoop = false) {
   if (!wavBuffers[name]) return;
   if (activeSources[name]) { try { activeSources[name].stop(time); } catch(e) {} }
   
   const src = ctx.createBufferSource();
   src.buffer = wavBuffers[name];
-  src.loop = isIntro; 
+  src.loop = shouldLoop; 
   src.playbackRate.value = currentRate; 
   src.connect(layers[name].gain);
   src.start(time);
@@ -430,16 +415,19 @@ function playLayer(name, time, isIntro = false) {
 function startIntro() {
   const now = ctx.currentTime;
   layers.melody.gain.gain.setValueAtTime(1.0, now);
-  playLayer('melody', now, true); 
+  playLayer('melody', now, true); // Мелодия зацикливается
   ['snare', 'hat', 'bass808'].forEach(n => layers[n].gain.gain.setValueAtTime(0, now));
 
   introTimer = setTimeout(() => {
     if (activeSources['melody']) try { activeSources['melody'].stop(); } catch(e) {}
     const startTime = ctx.currentTime + 0.05;
+    
+    // Запускаем ВСЕ 4 СЛОЯ ОДИН РАЗ и зацикливаем навсегда
     LAYER_NAMES.forEach(n => {
       layers[n].gain.gain.setValueAtTime(1.0, startTime); 
-      playLayer(n, startTime, false); 
+      playLayer(n, startTime, true); 
     });
+    
     introTimer = setTimeout(() => {
       isGenerating = true;
       scheduleNextBar();
@@ -456,16 +444,13 @@ function scheduleNextBar() {
   const x = (currentRate - 1.0) / 0.35; 
 
   applyVariationFX(currentVariation, x);
-  layers.melody.gain.gain.setValueAtTime(0.8 - 0.2 * x, startTime);
-  playLayer('melody', startTime, false);
 
   let play808 = false, playSnare = false, playHat = false;
 
   if (currentVariation === 'stems') {
-    play808 = false; playSnare = false; playHat = false;
-    if (x > 0.1) play808 = true;
-    if (x > 0.4) playSnare = true;
-    if (x > 0.7) playHat = true;
+    play808 = x > 0.1;
+    playSnare = x > 0.4;
+    playHat = x > 0.7;
   } 
   else if (currentVariation === 'halftime') {
     play808 = true;
@@ -476,16 +461,16 @@ function scheduleNextBar() {
     play808 = true; playSnare = false; playHat = false;
   }
   else {
-    play808 = true; playSnare = true; playHat = true;
+    play808 = Math.random() < 0.8;
+    playSnare = Math.random() < (0.2 + (x * 0.7));
+    playHat = Math.random() < (0.1 + (x * 0.8));
   }
 
-  layers.bass808.gain.gain.setValueAtTime(play808 ? (0.2 + 0.8 * x) : 0, startTime);
-  layers.snare.gain.gain.setValueAtTime(playSnare ? (0.1 + 0.8 * x) : 0, startTime);
-  layers.hat.gain.gain.setValueAtTime(playHat ? (0.1 + 0.7 * x) : 0, startTime);
-
-  if (play808) playLayer('bass808', startTime, false);
-  if (playSnare) playLayer('snare', startTime, false);
-  if (playHat) playLayer('hat', startTime, false);
+  // ВАЖНО: Мы просто меняем громкость (Fade In/Out). Файлы не перезапускаются!
+  layers.bass808.gain.gain.setTargetAtTime(play808 ? (0.2 + 0.8 * x) : 0, startTime, 0.1);
+  layers.snare.gain.gain.setTargetAtTime(playSnare ? (0.1 + 0.8 * x) : 0, startTime, 0.1);
+  layers.hat.gain.gain.setTargetAtTime(playHat ? (0.1 + 0.7 * x) : 0, startTime, 0.1);
+  layers.melody.gain.gain.setTargetAtTime(0.8 - 0.2 * x, startTime, 0.1);
 
   sequencerTimer = setTimeout(scheduleNextBar, (BEAT_DURATION / currentRate) * 1000);
 }
@@ -507,14 +492,9 @@ document.querySelectorAll('.var-btn').forEach(btn => {
     document.getElementById('modeState').textContent = e.target.textContent.trim();
     log('💥 Выбрана вариация: ' + currentVariation);
 
-    // УБРАНА ПРОВЕРКА isGenerating, теперь эффекты применяются ВСЕГДА, если есть ctx
     if (ctx) {
       applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
-      
-      // Если мы уже в режиме генерации, моментально перестраиваем слои
-      if (isGenerating && ctx.state === 'running') {
-        forceImmediateChange();
-      }
+      forceImmediateChange(); // Мгновенно меняем громкость
     }
   });
 });
@@ -585,8 +565,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       log('▶️ Продолжение');
       
       if (isGenerating) {
-        stopAllLayers();
-        scheduleNextBar();
+        scheduleNextBar(); // Просто возобновляем смену громкости
       } else {
         stopAllLayers();
         startIntro(); 
