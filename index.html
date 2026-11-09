@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Идеальный переход)</title>
+<title>Адаптивная музыка (Идеальный дроп)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -88,8 +88,8 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка (Идеальный переход)</h1>
-<p>Мелодия сыграет ровно один раз, а затем без единой паузы врубится бесконечный бит.</p>
+<h1>🏃 Адаптивная музыка (Бесшовный дроп)</h1>
+<p>Мелодия сыграет ровно один раз, затем мгновенно врубится бит. Работают только фильтры и эхо.</p>
 
 <div class="variations" id="variationsPanel">
   <button class="var-btn active" data-var="standard">Стандарт</button>
@@ -97,7 +97,7 @@
   <button class="var-btn" data-var="echo">🌪️ Эхо</button>
   <button class="var-btn" data-var="halftime">🥁 Half-Time</button>
   <button class="var-btn" data-var="bass808">🔊 808</button>
-  <button class="var-btn" data-var="stems">🎚️ Слои</button>
+  <button class="var-btn" data-var="stems">🎚️ Слои (Фильтр)</button>
 </div>
 
 <button id="micBtn">🎤 Включить микрофон</button>
@@ -132,7 +132,6 @@ const LAYER_FILES = {
   hat:     './hat.wav',
   bass808: './808.wav'
 };
-const BEAT_DURATION = 3.42; 
 
 let ctx = null, masterGain = null, limiter = null, layers = null; 
 let currentRate = 1.0;
@@ -141,7 +140,7 @@ let sliderOverrideUntil = 0;
 let wavBuffers = {};
 let activeSources = {}; 
 let melodyDelay = null, melodyDelayFeedback = null, melodyDryGain = null, melodyWetGain = null;
-let sequencerTimer = null, introTimer = null, isGenerating = false, beatCounter = 0;
+let dropTimer = null;
 let audioStarted = false; 
 
 let micActive = false;
@@ -309,49 +308,37 @@ setInterval(() => {
 function applyVariationFX(name, x) {
   if (!ctx) return;
   const now = ctx.currentTime;
-  const rT = 0.01; 
+  const rT = 0.1; 
 
+  // Базовые значения
   layers.melody.filter.frequency.setTargetAtTime(4000, now, rT);
+  layers.snare.filter.frequency.setTargetAtTime(400, now, rT);
+  layers.hat.filter.frequency.setTargetAtTime(3000, now, rT);
   layers.bass808.filter.frequency.setTargetAtTime(80 + 250 * x, now, rT);
   melodyWetGain.gain.setTargetAtTime(0, now, rT);
   melodyDryGain.gain.setTargetAtTime(1.0, now, rT);
 
-  if (name === 'filter') layers.melody.filter.frequency.setTargetAtTime(300, now, rT);
+  // --- ТОЛЬКО ЭФФЕКТЫ И ФИЛЬТРЫ ---
+  if (name === 'filter') {
+    layers.melody.filter.frequency.setTargetAtTime(300, now, rT);
+  }
   if (name === 'echo') {
     melodyWetGain.gain.setTargetAtTime(0.9, now, rT);
     melodyDryGain.gain.setTargetAtTime(0.3, now, rT);
   }
-  if (name === 'bass808') layers.bass808.filter.frequency.setTargetAtTime(500, now, rT);
-}
-
-function forceImmediateChange() {
-  if (!ctx || !isGenerating || ctx.state !== 'running') return;
-  const now = ctx.currentTime;
-  const x = (currentRate - 1.0) / 0.35;
-
-  let play808 = false, playSnare = false, playHat = false;
-
-  if (currentVariation === 'stems') {
-    play808 = x > 0.1; playSnare = x > 0.4; playHat = x > 0.7;
-  } else if (currentVariation === 'halftime') {
-    play808 = true; playSnare = (beatCounter % 2 === 0); playHat = (beatCounter % 4 === 0);
-  } else if (currentVariation === 'bass808') {
-    play808 = true;
-  } else {
-    play808 = true; playSnare = true; playHat = true;
+  if (name === 'bass808') {
+    layers.bass808.filter.frequency.setTargetAtTime(500, now, rT);
+    layers.melody.filter.frequency.setTargetAtTime(1000, now, rT); // Мелодию чуть глушим, чтобы бас вышел вперед
   }
-
-  layers.bass808.gain.gain.setTargetAtTime(play808 ? (0.2 + 0.8 * x) : 0, now, 0.05);
-  layers.snare.gain.gain.setTargetAtTime(playSnare ? (0.1 + 0.8 * x) : 0, now, 0.05);
-  layers.hat.gain.gain.setTargetAtTime(playHat ? (0.1 + 0.7 * x) : 0, now, 0.05);
-}
-
-function stopAllLayers() {
-  for (const name in activeSources) {
-    if (activeSources[name]) {
-      try { activeSources[name].stop(); } catch(e) {}
-      activeSources[name] = null;
-    }
+  if (name === 'halftime') {
+    // Имитация Half-Time через фильтр (глухой звук)
+    layers.melody.filter.frequency.setTargetAtTime(600, now, rT);
+    layers.hat.filter.frequency.setTargetAtTime(1500, now, rT);
+  }
+  if (name === 'stems') {
+    // Имитация тонкого звука (телефонный эффект)
+    layers.melody.filter.frequency.setTargetAtTime(2000, now, rT); 
+    layers.bass808.filter.frequency.setTargetAtTime(150, now, rT);
   }
 }
 
@@ -364,93 +351,51 @@ async function loadAllWavs() {
       wavBuffers[name] = await ctx.decodeAudioData(arrayBuffer);
     } catch (err) { throw new Error('Файл не найден: ' + LAYER_FILES[name]); }
   }
-  log('✅ Аудио загружено. Запускаем интро.');
+  log('✅ Аудио загружено. Запуск...');
   startIntro();
 }
 
-function playLayer(name, time, shouldLoop = false) {
-  if (!wavBuffers[name]) return;
-  if (activeSources[name]) { try { activeSources[name].stop(time); } catch(e) {} }
-  
-  const src = ctx.createBufferSource();
-  src.buffer = wavBuffers[name];
-  src.loop = shouldLoop; 
-  src.playbackRate.value = currentRate; 
-  src.connect(layers[name].gain);
-  src.start(time);
-  activeSources[name] = src;
-}
-
 function startIntro() {
-  const now = ctx.currentTime + 0.1; // Небольшой буфер для точности
+  const now = ctx.currentTime + 0.1; 
   const introDuration = wavBuffers['melody'].duration; // Длительность ровно одного проигрывания
   const dropTime = now + introDuration; // Время старта дропа
 
+  // 1. Запускаем ВСЕ 4 файла СРАЗУ, чтобы они были синхронизированы
+  LAYER_NAMES.forEach(n => {
+    const src = ctx.createBufferSource();
+    src.buffer = wavBuffers[n];
+    src.loop = true; // Бесконечный цикл
+    src.playbackRate.value = currentRate; 
+    src.connect(layers[n].gain);
+    src.start(now);
+    activeSources[n] = src;
+  });
+
+  // 2. Мелодия играет громко
   layers.melody.gain.gain.setValueAtTime(1.0, now);
-  // ИНТРО: Мелодия играет 1 раз без цикла
-  playLayer('melody', now, false); 
-  ['snare', 'hat', 'bass808'].forEach(n => layers[n].gain.gain.setValueAtTime(0, now));
+  
+  // 3. Остальные инструменты выключены в начале
+  layers.snare.gain.gain.setValueAtTime(0, now);
+  layers.hat.gain.gain.setValueAtTime(0, now);
+  layers.bass808.gain.gain.setValueAtTime(0, now);
 
   log(`▶️ Интро: ${introDuration.toFixed(2)} сек.`);
 
-  // ДРОП: Планируем запуск всех 4 слоев ЗАРАНЕЕ на exact dropTime
-  LAYER_NAMES.forEach(n => {
-    layers[n].gain.gain.setValueAtTime(1.0, dropTime); 
-    // Запускаем в цикле навсегда
-    const src = ctx.createBufferSource();
-    src.buffer = wavBuffers[n];
-    src.loop = true; 
-    src.playbackRate.value = currentRate; 
-    src.connect(layers[n].gain);
-    src.start(dropTime);
-    // Сохраняем в activeSources для управления громкостью
-    if (activeSources[n]) { try { activeSources[n].stop(dropTime); } catch(e) {} }
-    activeSources[n] = src; 
-  });
+  // 4. В момент окончания интро (с точностью до микросекунды) включаем остальные слои
+  layers.snare.gain.gain.setValueAtTime(0, dropTime);
+  layers.snare.gain.gain.linearRampToValueAtTime(0.8, dropTime + 0.05);
+  
+  layers.hat.gain.gain.setValueAtTime(0, dropTime);
+  layers.hat.gain.gain.linearRampToValueAtTime(0.7, dropTime + 0.05);
+  
+  layers.bass808.gain.gain.setValueAtTime(0, dropTime);
+  layers.bass808.gain.gain.linearRampToValueAtTime(0.9, dropTime + 0.05);
 
-  // Включаем логику генерации ровно через introDuration
-  introTimer = setTimeout(() => {
-    isGenerating = true;
-    log('🔥 ДРОП! Бесконечный бит.');
-    scheduleNextBar();
+  // 5. Включаем логику дропа для UI и кнопок
+  dropTimer = setTimeout(() => {
+    log('🔥 ДРОП! Бит пошел.');
+    applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
   }, (dropTime - ctx.currentTime) * 1000);
-}
-
-function scheduleNextBar() {
-  if (!ctx || ctx.state !== 'running' || !isGenerating) return;
-
-  const now = ctx.currentTime;
-  const startTime = now + 0.05;
-  beatCounter++;
-  const x = (currentRate - 1.0) / 0.35; 
-
-  applyVariationFX(currentVariation, x);
-
-  let play808 = false, playSnare = false, playHat = false;
-
-  if (currentVariation === 'stems') {
-    play808 = x > 0.1; playSnare = x > 0.4; playHat = x > 0.7;
-  } 
-  else if (currentVariation === 'halftime') {
-    play808 = true;
-    playSnare = (beatCounter % 2 === 0); 
-    playHat = (beatCounter % 4 === 0); 
-  } 
-  else if (currentVariation === 'bass808') {
-    play808 = true; playSnare = false; playHat = false;
-  }
-  else {
-    play808 = Math.random() < 0.8;
-    playSnare = Math.random() < (0.2 + (x * 0.7));
-    playHat = Math.random() < (0.1 + (x * 0.8));
-  }
-
-  layers.bass808.gain.gain.setTargetAtTime(play808 ? (0.2 + 0.8 * x) : 0, startTime, 0.1);
-  layers.snare.gain.gain.setTargetAtTime(playSnare ? (0.1 + 0.8 * x) : 0, startTime, 0.1);
-  layers.hat.gain.gain.setTargetAtTime(playHat ? (0.1 + 0.7 * x) : 0, startTime, 0.1);
-  layers.melody.gain.gain.setTargetAtTime(0.8 - 0.2 * x, startTime, 0.1);
-
-  sequencerTimer = setTimeout(scheduleNextBar, (BEAT_DURATION / currentRate) * 1000);
 }
 
 function log(msg) {
@@ -465,10 +410,7 @@ document.querySelectorAll('.var-btn').forEach(btn => {
     currentVariation = e.target.getAttribute('data-var');
     document.getElementById('modeState').textContent = e.target.textContent.trim();
     log('💥 ' + currentVariation);
-    if (ctx) {
-      applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
-      forceImmediateChange(); 
-    }
+    if (ctx) applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
   });
 });
 
@@ -528,21 +470,12 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   } else {
     if (ctx.state === 'running') { 
       await ctx.suspend(); 
-      clearTimeout(sequencerTimer);
-      clearTimeout(introTimer);
       btn.textContent = '▶️ Продолжить'; 
       log('⏸ Пауза');
     } else { 
       await ctx.resume(); 
       btn.textContent = '⏸ Пауза'; 
       log('▶️ Продолжение');
-      
-      if (isGenerating) {
-        scheduleNextBar();
-      } else {
-        stopAllLayers();
-        startIntro(); 
-      }
     }
   }
 });
