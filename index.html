@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Идеальный дроп)</title>
+<title>Адаптивная музыка (Железобетонный синхрон)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -141,12 +141,15 @@ let wavBuffers = {};
 let activeSources = {}; 
 let melodyDelay = null, melodyDelayFeedback = null, melodyDryGain = null, melodyWetGain = null;
 let audioStarted = false; 
-let isDropped = false;
 
-let startTime = 0;
+let isDropped = false;
+let isPlaying = false;
 let dropTime = 0;
-let introDuration = 0;
 let dropTimerId = null;
+
+// Переменные для абсолютной синхронизации при паузе
+let bufferTime = 0; 
+let trackStartTime = 0;
 
 let micActive = false;
 let analyser = null;
@@ -252,14 +255,22 @@ function setPlaybackSpeed(rate, fromSlider = false) {
 
   const now = ctx.currentTime;
   
-  // Если мы в интро и меняем скорость, пересчитываем точное время дропа
-  if (!isDropped && activeSources['melody']) {
-    const elapsedBuffer = (now - startTime) * currentRate;
-    if (elapsedBuffer < introDuration) {
-      const remainingBuffer = introDuration - elapsedBuffer;
-      dropTime = now + (remainingBuffer / rate);
-      applyDropGains();
-      scheduleDropTimer();
+  // Если мы играем, фиксируем время, прошедшее с момента старта/последней смены скорости
+  if (isPlaying) {
+    bufferTime += (now - trackStartTime) * currentRate;
+    trackStartTime = now;
+    
+    // Пересчитываем время дропа, если мы всё ещё в интро
+    if (!isDropped) {
+      const introDuration = wavBuffers['melody'].duration;
+      if (bufferTime < introDuration) {
+        const remainingBuffer = introDuration - bufferTime;
+        dropTime = now + (remainingBuffer / rate);
+        applyDropGains();
+        scheduleDropTimer();
+      } else {
+        isDropped = true;
+      }
     }
   }
 
@@ -279,6 +290,9 @@ function setPlaybackSpeed(rate, fromSlider = false) {
   }
 }
 
+// ==========================================
+// ДАТЧИК ДВИЖЕНИЯ
+// ==========================================
 let motionActive = false, motionEventCount = 0, stepTimestamps = [];
 let lastStepTime = 0, aboveThreshold = false;
 let dynamicHigh = 11.0, dynamicLow = 9.8, gravityMag = 9.8;   
@@ -311,7 +325,7 @@ function handleMotion(event) {
 }
 
 setInterval(() => {
-  if (!motionActive || performance.now() < sliderOverrideUntil || micActive) return;
+  if (!motionActive || performance.now() < sliderOverrideUntil || micActive || !isPlaying) return;
   const now = performance.now();
   stepTimestamps = stepTimestamps.filter(t => now - t < 4000); 
   const cadence = stepTimestamps.length * 15;
@@ -325,6 +339,9 @@ setInterval(() => {
   setPlaybackSpeed(Math.max(1.0, Math.min(1.35, targetRate)));
 }, 500); 
 
+// ==========================================
+// ЭФФЕКТЫ (ТОЛЬКО ФИЛЬТРЫ)
+// ==========================================
 function applyVariationFX(name) {
   if (!ctx) return;
   const now = ctx.currentTime;
@@ -358,13 +375,12 @@ function applyVariationFX(name) {
 }
 
 // ==========================================
-// МЕХАНИЗМ ИДЕАЛЬНОГО ДРОПА
+// МЕХАНИЗМ ДРОПА
 // ==========================================
 function applyDropGains() {
   const now = ctx.currentTime;
   const targetDrop = Math.max(now + 0.05, dropTime); 
 
-  // Отменяем старые планы и планируем новые
   layers.snare.gain.gain.cancelScheduledValues(now);
   layers.snare.gain.gain.setValueAtTime(0.0, targetDrop - 0.01); 
   layers.snare.gain.gain.linearRampToValueAtTime(0.8, targetDrop + 0.05);
@@ -391,6 +407,9 @@ function scheduleDropTimer() {
   }
 }
 
+// ==========================================
+// ЗАПУСК, ПАУЗА И ПРОДОЛЖЕНИЕ
+// ==========================================
 async function loadAllWavs() {
   for (const name of LAYER_NAMES) {
     try {
@@ -405,35 +424,93 @@ async function loadAllWavs() {
 }
 
 function startEngine() {
-  startTime = ctx.currentTime + 0.2;
-  introDuration = wavBuffers['melody'].duration;
-  dropTime = startTime + (introDuration / currentRate);
+  bufferTime = 0;
+  trackStartTime = ctx.currentTime + 0.2;
   isDropped = false;
+  isPlaying = true;
 
-  if (dropTimerId) clearTimeout(dropTimerId);
+  const introDuration = wavBuffers['melody'].duration;
+  dropTime = trackStartTime + (introDuration / currentRate);
 
-  // 1. Запускаем ВСЕ 4 ФАЙЛА одновременно и зацикливаем
   LAYER_NAMES.forEach(name => {
     const src = ctx.createBufferSource();
     src.buffer = wavBuffers[name];
     src.loop = true;
     src.playbackRate.value = currentRate;
     src.connect(layers[name].gain);
-    src.start(startTime);
+    src.start(trackStartTime);
     activeSources[name] = src;
   });
 
-  // 2. Изначально: мелодия играет, барабаны молчат
-  layers.melody.gain.gain.setValueAtTime(1.0, startTime);
-  layers.snare.gain.gain.setValueAtTime(0.0, startTime);
-  layers.hat.gain.gain.setValueAtTime(0.0, startTime);
-  layers.bass808.gain.gain.setValueAtTime(0.0, startTime);
+  layers.melody.gain.gain.setValueAtTime(1.0, trackStartTime);
+  layers.snare.gain.gain.setValueAtTime(0.0, trackStartTime);
+  layers.hat.gain.gain.setValueAtTime(0.0, trackStartTime);
+  layers.bass808.gain.gain.setValueAtTime(0.0, trackStartTime);
 
-  // 3. Планируем дроп
   applyDropGains();
   scheduleDropTimer();
-  
   log('▶️ Интро: Мелодия играет один раз...');
+}
+
+async function pauseAudio() {
+  if (!isPlaying) return;
+  isPlaying = false;
+  
+  // Запоминаем точное время в буфере
+  bufferTime += (ctx.currentTime - trackStartTime) * currentRate;
+  
+  for (const name in activeSources) {
+    if (activeSources[name]) {
+      try { activeSources[name].stop(); } catch(e){}
+      activeSources[name] = null;
+    }
+  }
+  
+  if (dropTimerId) clearTimeout(dropTimerId);
+  await ctx.suspend();
+}
+
+async function resumeAudio() {
+  if (isPlaying) return;
+  await ctx.resume();
+  isPlaying = true;
+  
+  trackStartTime = ctx.currentTime;
+  const introDuration = wavBuffers['melody'].duration;
+  
+  // Пересоздаем все источники с точным смещением (offset)
+  LAYER_NAMES.forEach(name => {
+    const src = ctx.createBufferSource();
+    src.buffer = wavBuffers[name];
+    src.loop = true;
+    src.playbackRate.value = currentRate;
+    src.connect(layers[name].gain);
+    
+    const offset = bufferTime % wavBuffers[name].duration;
+    src.start(trackStartTime, offset);
+    activeSources[name] = src;
+  });
+  
+  // Восстанавливаем состояние громкости (до дропа или после)
+  if (bufferTime < introDuration) {
+    isDropped = false;
+    const remainingBuffer = introDuration - bufferTime;
+    dropTime = trackStartTime + (remainingBuffer / currentRate);
+    
+    layers.melody.gain.gain.setValueAtTime(1.0, trackStartTime);
+    layers.snare.gain.gain.setValueAtTime(0.0, trackStartTime);
+    layers.hat.gain.gain.setValueAtTime(0.0, trackStartTime);
+    layers.bass808.gain.gain.setValueAtTime(0.0, trackStartTime);
+    
+    applyDropGains();
+    scheduleDropTimer();
+  } else {
+    isDropped = true;
+    layers.melody.gain.gain.setValueAtTime(1.0, trackStartTime);
+    layers.snare.gain.gain.setValueAtTime(0.8, trackStartTime);
+    layers.hat.gain.gain.setValueAtTime(0.6, trackStartTime);
+    layers.bass808.gain.gain.setValueAtTime(0.9, trackStartTime);
+  }
 }
 
 function log(msg) {
@@ -506,14 +583,12 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       btn.disabled = false;
     }
   } else {
-    if (ctx.state === 'running') { 
-      await ctx.suspend(); 
-      if (dropTimerId) clearTimeout(dropTimerId);
+    if (isPlaying) { 
+      await pauseAudio(); 
       btn.textContent = '▶️ Продолжить'; 
       log('⏸ Пауза');
     } else { 
-      await ctx.resume(); 
-      if (!isDropped) scheduleDropTimer();
+      await resumeAudio(); 
       btn.textContent = '⏸ Пауза'; 
       log('▶️ Продолжение');
     }
