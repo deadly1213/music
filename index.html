@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Преднастройка + Микрофон)</title>
+<title>Адаптивная музыка (Микрофон + Live-вариации)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -88,10 +88,9 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка (Настройка до старта)</h1>
+<h1>🏃 Адаптивная музыка (Микрофон + Live)</h1>
 <p>Выберите эффект и включите микрофон. Затем нажмите «Старт».</p>
 
-<!-- ПАНЕЛЬ ВАРИАЦИЙ ВИДНА СРАЗУ -->
 <div class="variations" id="variationsPanel">
   <button class="var-btn active" data-var="standard">Стандарт</button>
   <button class="var-btn" data-var="filter">🌑 Фильтр</button>
@@ -101,7 +100,6 @@
   <button class="var-btn" data-var="stems">🎚️ Слои</button>
 </div>
 
-<!-- МИКРОФОН ВИДЕН СРАЗУ -->
 <button id="micBtn">🎤 Включить микрофон</button>
 <div class="mic-meter-wrap" id="micMeterWrap">
   <div class="mic-meter" id="micMeter"></div>
@@ -144,7 +142,8 @@ let sliderOverrideUntil = 0;
 let wavBuffers = {};
 let activeSources = {}; 
 let melodyDelay = null, melodyDelayFeedback = null, melodyDryGain = null, melodyWetGain = null;
-let sequencerTimer = null, isGenerating = false, beatCounter = 0;
+let sequencerTimer = null, introTimer = null, isGenerating = false, beatCounter = 0;
+let audioStarted = false; // Флаг, предотвращающий перезапуск
 
 // --- ПЕРЕМЕННЫЕ ДЛЯ МИКРОФОНА ---
 let micActive = false;
@@ -154,7 +153,7 @@ let micStream = null;
 let micLevel = 0; 
 
 function initAudio() {
-  if (ctx) return; // Защита от повторного создания
+  if (ctx) return; 
   ctx = new (window.AudioContext || window.webkitAudioContext)();
   masterGain = ctx.createGain();
   masterGain.gain.value = 0.55;
@@ -206,7 +205,7 @@ function initAudio() {
 async function initMicrophone() {
   try {
     if (!ctx) initAudio();
-    await ctx.resume(); // Разрешаем аудио-контексту работать для анализа
+    await ctx.resume(); 
 
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const source = ctx.createMediaStreamSource(micStream);
@@ -234,7 +233,6 @@ function updateMicLevel() {
   if (!micActive || !analyser) return;
 
   analyser.getByteTimeDomainData(micDataArray);
-
   let sum = 0;
   for (let i = 0; i < micDataArray.length; i++) {
     const x = (micDataArray[i] - 128) / 128.0;
@@ -256,7 +254,7 @@ function updateMicLevel() {
 }
 
 // ==========================================
-// АУДИО И УПРАВЛЕНИЕ
+// УПРАВЛЕНИЕ И ЭФФЕКТЫ
 // ==========================================
 function setPlaybackSpeed(rate, fromSlider = false) {
   if (!ctx) return;
@@ -326,9 +324,6 @@ setInterval(() => {
   setPlaybackSpeed(Math.max(1.0, Math.min(1.35, targetRate)));
 }, 500); 
 
-// ==========================================
-// ЭФФЕКТЫ И СЕКВЕНСОР
-// ==========================================
 function applyVariationFX(name, x) {
   if (!ctx) return;
   const now = ctx.currentTime;
@@ -386,6 +381,18 @@ function forceImmediateChange() {
   if (!playHat && activeSources['hat']) { try { activeSources['hat'].stop(now); } catch(e){} activeSources['hat'] = null; }
 }
 
+// ==========================================
+// СЕКВЕНСОР
+// ==========================================
+function stopAllLayers() {
+  for (const name in activeSources) {
+    if (activeSources[name]) {
+      try { activeSources[name].stop(); } catch(e) {}
+      activeSources[name] = null;
+    }
+  }
+}
+
 async function loadAllWavs() {
   for (const name of LAYER_NAMES) {
     try {
@@ -418,14 +425,14 @@ function startIntro() {
   playLayer('melody', now, true); 
   ['snare', 'hat', 'bass808'].forEach(n => layers[n].gain.gain.setValueAtTime(0, now));
 
-  setTimeout(() => {
+  introTimer = setTimeout(() => {
     if (activeSources['melody']) try { activeSources['melody'].stop(); } catch(e) {}
     const startTime = ctx.currentTime + 0.05;
     LAYER_NAMES.forEach(n => {
       layers[n].gain.gain.setValueAtTime(1.0, startTime); 
       playLayer(n, startTime, false); 
     });
-    setTimeout(() => {
+    introTimer = setTimeout(() => {
       isGenerating = true;
       scheduleNextBar();
     }, (BEAT_DURATION / currentRate) * 1000);
@@ -481,7 +488,7 @@ function log(msg) {
 }
 
 // ==========================================
-// ОБРАБОТЧИКИ КНОПОК
+// КНОПКИ И ОБРАБОТЧИКИ
 // ==========================================
 document.querySelectorAll('.var-btn').forEach(btn => {
   btn.addEventListener('click', (e) => {
@@ -492,7 +499,7 @@ document.querySelectorAll('.var-btn').forEach(btn => {
     document.getElementById('modeState').textContent = e.target.textContent.trim();
     log('💥 Выбрана вариация: ' + currentVariation);
 
-    if (ctx && isGenerating) {
+    if (ctx && isGenerating && ctx.state === 'running') {
       applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
       forceImmediateChange();
     }
@@ -508,19 +515,20 @@ document.getElementById('micBtn').addEventListener('click', async () => {
     document.getElementById('micBtn').classList.remove('mic-active');
     document.getElementById('micBtn').textContent = '🎤 Включить микрофон';
     document.getElementById('micMeterWrap').style.display = 'none';
-    log('🎤 Микрофон выключен. Управление вернется датчикам.');
+    log('🎤 Микрофон выключен.');
   }
 });
 
 document.getElementById('startBtn').addEventListener('click', async () => {
   const btn = document.getElementById('startBtn');
   
-  if (!isGenerating && !btn.disabled) {
+  // 1. ПЕРВЫЙ ЗАПУСК
+  if (!audioStarted) {
+    audioStarted = true;
     try {
       if (!ctx) initAudio();
       await ctx.resume();
 
-      // Включаем датчик движения только если микрофон выключен
       if (!micActive) {
         if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
           const perm = await DeviceMotionEvent.requestPermission();
@@ -548,17 +556,32 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       btn.disabled = false;
     } catch (e) {
       log('❌ ' + e.message);
+      audioStarted = false;
       btn.textContent = '▶️ Старт';
       btn.disabled = false;
     }
-  } else {
-    // Пауза / Продолжить
+  } 
+  // 2. ПАУЗА / ПРОДОЛЖЕНИЕ
+  else {
     if (ctx.state === 'running') { 
       await ctx.suspend(); 
+      clearTimeout(sequencerTimer);
+      clearTimeout(introTimer);
       btn.textContent = '▶️ Продолжить'; 
+      log('⏸ Пауза');
     } else { 
       await ctx.resume(); 
       btn.textContent = '⏸ Пауза'; 
+      log('▶️ Продолжение');
+      
+      // Перезапускаем цикл, так как таймеры были сброшены
+      if (isGenerating) {
+        stopAllLayers();
+        scheduleNextBar();
+      } else {
+        stopAllLayers();
+        startIntro(); // Перезапуск интро, если пауза была во время него
+      }
     }
   }
 });
