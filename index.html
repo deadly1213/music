@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Адаптивная музыка (Микрофон + Live-вариации)</title>
+<title>Адаптивная музыка (Преднастройка + Микрофон)</title>
 <style>
   body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -88,18 +88,11 @@
 </head>
 <body>
 
-<h1>🏃 Адаптивная музыка (Микрофон + Live)</h1>
-<p>Управляй музыкой голосом, шумом или шагами.</p>
+<h1>🏃 Адаптивная музыка (Настройка до старта)</h1>
+<p>Выберите эффект и включите микрофон. Затем нажмите «Старт».</p>
 
-<button id="startBtn">▶️ Старт</button>
-<button id="micBtn" style="display:none;">🎤 Включить микрофон</button>
-<button id="sliderResetBtn" style="display:none; background:#444; color:#fff;">🔄 Сбросить ручной темп</button>
-
-<div class="mic-meter-wrap" id="micMeterWrap">
-  <div class="mic-meter" id="micMeter"></div>
-</div>
-
-<div class="variations" id="variationsPanel" style="display:none;">
+<!-- ПАНЕЛЬ ВАРИАЦИЙ ВИДНА СРАЗУ -->
+<div class="variations" id="variationsPanel">
   <button class="var-btn active" data-var="standard">Стандарт</button>
   <button class="var-btn" data-var="filter">🌑 Фильтр</button>
   <button class="var-btn" data-var="echo">🌪️ Эхо</button>
@@ -107,6 +100,17 @@
   <button class="var-btn" data-var="bass808">🔊 808</button>
   <button class="var-btn" data-var="stems">🎚️ Слои</button>
 </div>
+
+<!-- МИКРОФОН ВИДЕН СРАЗУ -->
+<button id="micBtn">🎤 Включить микрофон</button>
+<div class="mic-meter-wrap" id="micMeterWrap">
+  <div class="mic-meter" id="micMeter"></div>
+</div>
+
+<br><br>
+
+<button id="startBtn" style="background:#2fbf71; color:#000; font-size: 16px;">▶️ Старт</button>
+<button id="sliderResetBtn" style="display:none; background:#444; color:#fff;">🔄 Сбросить ручной темп</button>
 
 <div class="slider-row" style="margin: 18px 0;">
   <label>Скорость вручную: <span id="sliderVal">1.00x</span></label>
@@ -120,7 +124,7 @@
 </div>
 
 <div class="bar-wrap"><div class="bar" id="intensityBar"></div></div>
-<div id="log">Готов к запуску.</div>
+<div id="log">Готов к настройке. Выберите эффект или включите микрофон.</div>
 
 <script>
 const LAYER_NAMES = ['melody', 'snare', 'hat', 'bass808'];
@@ -147,9 +151,10 @@ let micActive = false;
 let analyser = null;
 let micDataArray = null;
 let micStream = null;
-let micLevel = 0; // 0.0 до 1.0
+let micLevel = 0; 
 
 function initAudio() {
+  if (ctx) return; // Защита от повторного создания
   ctx = new (window.AudioContext || window.webkitAudioContext)();
   masterGain = ctx.createGain();
   masterGain.gain.value = 0.55;
@@ -192,6 +197,7 @@ function initAudio() {
     }
     layers[name] = { gain, filter };
   }
+  setPlaybackSpeed(1.0, true);
 }
 
 // ==========================================
@@ -199,6 +205,9 @@ function initAudio() {
 // ==========================================
 async function initMicrophone() {
   try {
+    if (!ctx) initAudio();
+    await ctx.resume(); // Разрешаем аудио-контексту работать для анализа
+
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const source = ctx.createMediaStreamSource(micStream);
     
@@ -213,9 +222,8 @@ async function initMicrophone() {
     document.getElementById('micBtn').textContent = '🎤 Микрофон активен';
     document.getElementById('micMeterWrap').style.display = 'block';
     
-    log('🎤 Микрофон подключен. Кричите!');
+    log('🎤 Микрофон подключен. Проверьте громкость.');
     
-    // Запускаем цикл чтения микрофона
     requestAnimationFrame(updateMicLevel);
   } catch (err) {
     log('❌ Ошибка микрофона: ' + err.message);
@@ -227,7 +235,6 @@ function updateMicLevel() {
 
   analyser.getByteTimeDomainData(micDataArray);
 
-  // Считаем RMS (среднеквадратичное отклонение) для громкости
   let sum = 0;
   for (let i = 0; i < micDataArray.length; i++) {
     const x = (micDataArray[i] - 128) / 128.0;
@@ -235,21 +242,13 @@ function updateMicLevel() {
   }
   const rms = Math.sqrt(sum / micDataArray.length);
   
-  // Сглаживаем значение (чтобы не дёргалось слишком резко)
   micLevel = (micLevel * 0.8) + (rms * 0.2);
-  
-  // Визуализация на полоске
-  const displayLevel = Math.min(100, micLevel * 300); // Умножаем для наглядности
+  const displayLevel = Math.min(100, micLevel * 300); 
   document.getElementById('micMeter').style.width = displayLevel + '%';
 
-  // Если микрофон активен, он управляет скоростью (игнорируем шагомер)
   if (micActive && performance.now() > sliderOverrideUntil) {
-    // Если micLevel маленький (тишина) - скорость 1.0
-    // Если micLevel большой (крик) - скорость до 1.35
-    // 0.05 - это порог тишины, чтобы фоновый шум не ускорял трек
     const intensity = Math.max(0, Math.min(1, (micLevel - 0.02) * 15));
     const targetRate = 1.0 + (intensity * 0.35);
-    
     setPlaybackSpeed(targetRate);
   }
 
@@ -263,7 +262,6 @@ function setPlaybackSpeed(rate, fromSlider = false) {
   if (!ctx) return;
   rate = Math.max(1.0, Math.min(1.35, rate));
   
-  // Если скорость изменилась незначительно, не трогаем аудио-ноду
   if (Math.abs(rate - currentRate) < 0.005 && !fromSlider) return;
 
   const now = ctx.currentTime;
@@ -287,7 +285,7 @@ let lastStepTime = 0, aboveThreshold = false;
 let dynamicHigh = 11.0, dynamicLow = 9.8, gravityMag = 9.8;   
 
 function handleMotion(event) {
-  if (performance.now() < sliderOverrideUntil || micActive) return; // Если микрофон включен, шагомер спит
+  if (performance.now() < sliderOverrideUntil || micActive) return; 
   const acc = event.accelerationIncludingGravity;
   if (!acc) return;
   motionEventCount++;
@@ -397,7 +395,7 @@ async function loadAllWavs() {
       wavBuffers[name] = await ctx.decodeAudioData(arrayBuffer);
     } catch (err) { throw new Error('Файл не найден: ' + LAYER_FILES[name]); }
   }
-  log('✅ Загружено');
+  log('✅ Аудио загружено. Поехали!');
   startIntro();
 }
 
@@ -483,7 +481,7 @@ function log(msg) {
 }
 
 // ==========================================
-// КНОПКИ
+// ОБРАБОТЧИКИ КНОПОК
 // ==========================================
 document.querySelectorAll('.var-btn').forEach(btn => {
   btn.addEventListener('click', (e) => {
@@ -492,7 +490,7 @@ document.querySelectorAll('.var-btn').forEach(btn => {
     
     currentVariation = e.target.getAttribute('data-var');
     document.getElementById('modeState').textContent = e.target.textContent.trim();
-    log('💥 ' + currentVariation);
+    log('💥 Выбрана вариация: ' + currentVariation);
 
     if (ctx && isGenerating) {
       applyVariationFX(currentVariation, (currentRate - 1.0) / 0.35);
@@ -501,23 +499,38 @@ document.querySelectorAll('.var-btn').forEach(btn => {
   });
 });
 
+document.getElementById('micBtn').addEventListener('click', async () => {
+  if (!micActive) {
+    initMicrophone();
+  } else {
+    micActive = false;
+    if (micStream) micStream.getTracks().forEach(t => t.stop());
+    document.getElementById('micBtn').classList.remove('mic-active');
+    document.getElementById('micBtn').textContent = '🎤 Включить микрофон';
+    document.getElementById('micMeterWrap').style.display = 'none';
+    log('🎤 Микрофон выключен. Управление вернется датчикам.');
+  }
+});
+
 document.getElementById('startBtn').addEventListener('click', async () => {
   const btn = document.getElementById('startBtn');
-  if (!ctx) {
+  
+  if (!isGenerating && !btn.disabled) {
     try {
-      initAudio();
+      if (!ctx) initAudio();
       await ctx.resume();
-      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-        const perm = await DeviceMotionEvent.requestPermission();
-        if (perm === 'granted') window.addEventListener('devicemotion', handleMotion);
-      } else if (window.DeviceMotionEvent) {
-        window.addEventListener('devicemotion', handleMotion);
+
+      // Включаем датчик движения только если микрофон выключен
+      if (!micActive) {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+          const perm = await DeviceMotionEvent.requestPermission();
+          if (perm === 'granted') window.addEventListener('devicemotion', handleMotion);
+        } else if (window.DeviceMotionEvent) {
+          window.addEventListener('devicemotion', handleMotion);
+        }
       }
       
-      document.getElementById('micBtn').style.display = 'inline-block';
-      document.getElementById('variationsPanel').style.display = 'block';
       document.getElementById('slider').disabled = false;
-      
       document.getElementById('slider').addEventListener('input', (e) => {
         if (!ctx) return;
         sliderOverrideUntil = performance.now() + 5000;
@@ -530,6 +543,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       btn.textContent = '⏳ Загрузка…';
       btn.disabled = true;
       await loadAllWavs();
+      
       btn.textContent = '⏸ Пауза';
       btn.disabled = false;
     } catch (e) {
@@ -538,22 +552,14 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       btn.disabled = false;
     }
   } else {
-    if (ctx.state === 'running') { await ctx.suspend(); btn.textContent = '▶️ Продолжить'; }
-    else { await ctx.resume(); btn.textContent = '⏸ Пауза'; }
-  }
-});
-
-document.getElementById('micBtn').addEventListener('click', () => {
-  if (!micActive) {
-    initMicrophone();
-  } else {
-    // Выключение микрофона
-    micActive = false;
-    if (micStream) micStream.getTracks().forEach(t => t.stop());
-    document.getElementById('micBtn').classList.remove('mic-active');
-    document.getElementById('micBtn').textContent = '🎤 Включить микрофон';
-    document.getElementById('micMeterWrap').style.display = 'none';
-    log('🎤 Микрофон выключен');
+    // Пауза / Продолжить
+    if (ctx.state === 'running') { 
+      await ctx.suspend(); 
+      btn.textContent = '▶️ Продолжить'; 
+    } else { 
+      await ctx.resume(); 
+      btn.textContent = '⏸ Пауза'; 
+    }
   }
 });
 
